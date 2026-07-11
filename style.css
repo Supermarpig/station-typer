@@ -205,24 +205,71 @@ button:focus-visible, .line-card:focus-visible {
   color: var(--ink-mute);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.line-card .lc-side {
+.line-card .lc-best {
   margin-left: auto;
   flex: none;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
-  text-align: right;
-}
-.line-card .lc-best {
   font-size: 11px;
   color: var(--ink-dim);
+  text-align: right;
   line-height: 1.5;
 }
 .line-card .lc-best b { display: block; color: var(--ink-mute); font-size: 14px; font-family: var(--font-mono); }
-.lc-champ { font-size: 11px; color: #ffd97a; white-space: nowrap; }
-.lc-champ b { font-family: var(--font-mono); font-size: 12px; }
-.lc-champ:empty { display: none; }
+
+/* 首頁排行榜（選線畫面下方） */
+.home-board {
+  width: min(680px, 100%);
+  margin: 48px auto 0;
+  position: relative;
+}
+.hb-title {
+  text-align: center;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.3em;
+  color: var(--ink-mute);
+  margin-bottom: 14px;
+}
+.hb-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+.hb-tab {
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-mute);
+  background: var(--bg-raise);
+  border: 1px solid var(--bg-edge);
+  border-radius: 999px;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: color var(--dur-fast), border-color var(--dur-fast);
+}
+.hb-tab::before {
+  content: "";
+  display: inline-block;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--lc);
+  margin-right: 6px;
+}
+.hb-tab:hover { color: var(--ink); }
+.hb-tab.active {
+  color: var(--ink);
+  border-color: var(--lc);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--lc) 40%, transparent);
+}
+.hb-list {
+  background: #0d1322d9;
+  border: 1px solid var(--bg-edge);
+  border-radius: var(--radius-m);
+  padding: 10px 14px;
+  min-height: 64px;
+}
+.hb-list .board-hint { margin: 18px 0; }
 
 .foot-hint {
   text-align: center;

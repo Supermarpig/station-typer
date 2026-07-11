@@ -23,6 +23,7 @@ const els = {
   backBtn: $("backBtn"), retryBtn: $("retryBtn"), pickBtn: $("pickBtn"),
   muteBtn: $("muteBtn"),
   uploadRow: $("uploadRow"), nickInput: $("nickInput"), uploadBtn: $("uploadBtn"), board: $("board"),
+  hbTabs: $("hbTabs"), hbList: $("hbList"),
 };
 
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -262,26 +263,49 @@ function renderPicker() {
         <span class="lc-name">${line.zh}</span>
         <span class="lc-meta">${first} ⇄ ${last}・${line.stations.length} 站${line.note ? "・" + line.note : ""}</span>
       </span>
-      <span class="lc-side">
-        <span class="lc-champ" data-line="${line.id}"></span>
-        <span class="lc-best">${best ? `最佳<b>${best.score}</b>` : ""}</span>
-      </span>`;
+      <span class="lc-best">${best ? `最佳<b>${best.score}</b>` : ""}</span>`;
     card.addEventListener("click", () => startGame(line));
     els.lineGrid.appendChild(card);
   });
-  loadChampions();
 }
 
-/* 各路線榜首（首頁卡片上的 👑）；離線或 API 失敗時安靜略過 */
-async function loadChampions() {
-  try {
-    const rows = await fetch("/api/champions").then((r) => r.json());
-    if (!Array.isArray(rows)) return;
-    rows.forEach((r) => {
-      const el = document.querySelector(`.lc-champ[data-line="${r.line_id}"]`);
-      if (el) el.innerHTML = `👑 ${esc(r.name)} <b>${r.score | 0}</b>`;
+/* ─── 首頁排行榜（選線畫面下方，可切換路線）────────── */
+const hbState = { line: "BL" };
+
+function initHomeBoard() {
+  els.hbTabs.innerHTML = "";
+  LINES.forEach((line) => {
+    const tab = document.createElement("button");
+    tab.type = "button";
+    tab.className = "hb-tab" + (line.id === hbState.line ? " active" : "");
+    tab.style.setProperty("--lc", line.color);
+    tab.textContent = line.zh;
+    tab.addEventListener("click", () => {
+      hbState.line = line.id;
+      initHomeBoard();
     });
-  } catch { /* 首頁沒有榜首資訊也能正常玩 */ }
+    els.hbTabs.appendChild(tab);
+  });
+  loadHomeBoard();
+}
+
+async function loadHomeBoard() {
+  els.hbList.innerHTML = `<div class="board-hint">載入中…</div>`;
+  try {
+    const rows = await fetch(`/api/scores?line=${encodeURIComponent(hbState.line)}`).then((r) => r.json());
+    if (!Array.isArray(rows) || !rows.length) {
+      els.hbList.innerHTML = `<div class="board-hint">這條線還沒有紀錄，搶頭香！</div>`;
+      return;
+    }
+    els.hbList.innerHTML = rows.map((r, i) =>
+      `<div class="board-row${i === 0 ? " top1" : ""}">
+        <b>${i + 1}</b><span class="b-name">${esc(r.name)}</span>
+        <span class="b-kpm">${r.kpm | 0} KPM</span><span class="b-score">${r.score | 0}</span>
+      </div>`
+    ).join("");
+  } catch {
+    els.hbList.innerHTML = `<div class="board-hint">排行榜載入失敗</div>`;
+  }
 }
 
 /* ─── 遊戲畫面 ──────────────────────────────────────── */
@@ -1074,6 +1098,7 @@ function backToPicker() {
   els.overlay.classList.add("hidden");
   els.picker.classList.remove("hidden");
   renderPicker(); // 更新最佳成績
+  loadHomeBoard(); // 排行榜可能有新成績
 }
 
 els.backBtn.addEventListener("click", backToPicker);
@@ -1093,4 +1118,5 @@ els.muteBtn.addEventListener("click", (e) => {
 renderPicker();
 renderRivals();
 renderPickerBg();
+initHomeBoard();
 setMode("solo");
