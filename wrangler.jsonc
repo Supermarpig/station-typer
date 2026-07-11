@@ -1,0 +1,11 @@
+{
+  // 對應 Cloudflare 上既有的 station-typer Worker（純靜態資產）
+  "name": "station-typer",
+  "account_id": "a48fa87240a285385ba1b0279f9744ad",
+  "compatibility_date": "2026-07-01",
+  "assets": { "directory": "./" },
+  // 與儀表板現況一致：保留 workers.dev 網址與預覽網址
+  "workers_dev": true,
+  "preview_urls": true,
+  "routes": [{ "pattern": "station-typer.bloodtw.com", "custom_domain": true }]
+}

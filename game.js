@@ -96,12 +96,24 @@ function railStripSVG() {
   for (let x = 40; x < STRIP_W; x += 180) {
     pillars += `<rect x="${x - 7}" y="46" width="32" height="8" fill="#2a3552"/><rect x="${x}" y="52" width="18" height="78" fill="#222c48"/>`;
   }
-  return `<svg width="${STRIP_W}" height="130" viewBox="0 0 ${STRIP_W} 130" xmlns="http://www.w3.org/2000/svg">
+  // 近側（對面）股道：對戰時對手列車行駛的軌道，色調略亮表現距離較近
+  let nearTicks = "";
+  for (let x = 0; x < STRIP_W; x += 30) nearTicks += `<rect x="${x}" y="120" width="14" height="5" fill="#202a44"/>`;
+  let nearPillars = "";
+  for (let x = 130; x < STRIP_W; x += 180) {
+    nearPillars += `<rect x="${x - 8}" y="136" width="36" height="9" fill="#303c5c"/><rect x="${x}" y="143" width="20" height="57" fill="#283350"/>`;
+  }
+  return `<svg width="${STRIP_W}" height="200" viewBox="0 0 ${STRIP_W} 200" xmlns="http://www.w3.org/2000/svg">
     ${pillars}
     <rect x="0" y="20" width="${STRIP_W}" height="26" fill="#2e3a58"/>
     <rect x="0" y="20" width="${STRIP_W}" height="4" fill="#3d4a6e"/>
     <rect x="0" y="24" width="${STRIP_W}" height="2" fill="#55648c"/>
     ${ticks}
+    ${nearPillars}
+    <rect x="0" y="110" width="${STRIP_W}" height="26" fill="#364464"/>
+    <rect x="0" y="110" width="${STRIP_W}" height="4" fill="#48587e"/>
+    <rect x="0" y="114" width="${STRIP_W}" height="2" fill="#64749e"/>
+    ${nearTicks}
   </svg>`;
 }
 
@@ -360,9 +372,9 @@ function ensureLeaflet() {
       zoomControl: false,
       keyboard: false,
       zoomSnap: 0.25,
-      zoomAnimation: false,
+      zoomAnimation: !reducedMotion, // 抵站時鏡頭飛往下一段需要縮放動畫
       fadeAnimation: false,
-      markerZoomAnimation: false,
+      markerZoomAnimation: !reducedMotion,
     });
     L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
       attribution: "&copy; OpenStreetMap &copy; CARTO",
@@ -414,12 +426,23 @@ function buildLeafletMap() {
   // （用 setTimeout 而非 rAF：背景分頁的 rAF 會被暫停）
   setTimeout(() => {
     lMap.invalidateSize({ animate: false });
-    lMap.fitBounds(L.latLngBounds(latlngs), { padding: [28, 28], animate: false });
+    focusMapCam(false);
   }, 30);
 
   mapU = playerUnits();
   mapRivalU = 0;
   updateMapDots();
+}
+
+/* 跟車鏡頭：只框住當前站與下一站（終點時框最後一段），抵站時平滑飛往下一段 */
+function focusMapCam(animate) {
+  if (mapMode !== "leaflet" || !lMap || !state.line) return;
+  const sts = state.line.stations;
+  const i = Math.min(state.idx, sts.length - 2);
+  const bounds = L.latLngBounds([sts[i].pos, sts[i + 1].pos]);
+  const opts = { padding: [36, 36], maxZoom: 15.5 };
+  if (animate && !reducedMotion) lMap.flyToBounds(bounds, { ...opts, duration: 1.1 });
+  else lMap.fitBounds(bounds, { ...opts, animate: false });
 }
 
 function latLngAt(u) {
@@ -563,6 +586,7 @@ function updateMapHead(animate) {
   els.mapNow.textContent = cur.zh;
   els.mapDir.textContent = next ? `往 ${next.zh} ▶` : "終點站 TERMINAL";
   updateMapDots();
+  focusMapCam(animate);
   if (animate && !reducedMotion) {
     els.mapHead.classList.remove("arrive");
     void els.mapHead.offsetWidth;
@@ -944,8 +968,10 @@ addEventListener("resize", () => {
   resizeTimer = setTimeout(() => {
     if (!els.game.classList.contains("hidden")) {
       buildScene();
-      if (mapMode === "leaflet" && lMap) lMap.invalidateSize();
-      else buildMap();
+      if (mapMode === "leaflet" && lMap) {
+        lMap.invalidateSize();
+        focusMapCam(false);
+      } else buildMap();
     } else {
       renderPickerBg();
     }

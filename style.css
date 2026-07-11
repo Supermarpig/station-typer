@@ -221,6 +221,19 @@ button:focus-visible, .line-card:focus-visible {
   color: var(--ink-dim);
 }
 
+/* 回捐血主站的引流連結（選線畫面底部與結算卡） */
+.site-link {
+  display: block;
+  text-align: center;
+  align-self: center;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--ink-dim);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+.site-link:hover { color: var(--ink); text-decoration: underline; }
+
 /* ─── 遊戲：全螢幕場景 ──────────────────────────────── */
 #game {
   position: relative;
@@ -280,7 +293,7 @@ button:focus-visible, .line-card:focus-visible {
 
 #layerFar { bottom: calc(var(--horizon) + 6px); opacity: 0.9; }
 #layerNear { bottom: calc(var(--horizon) - 2px); }
-#layerRail { bottom: calc(var(--horizon) - 110px); }
+#layerRail { bottom: calc(var(--horizon) - 180px); } /* 條帶高 200，頂緣維持在 horizon+20 */
 
 .train {
   position: absolute;
@@ -311,12 +324,14 @@ button:focus-visible, .line-card:focus-visible {
 
 /* 對手列車 */
 .train.rival {
-  bottom: calc(var(--horizon) + 20px);
-  width: min(270px, 36vw);
-  opacity: 0.92;
-  filter: drop-shadow(0 8px 12px #00000080) grayscale(0.2);
+  /* 近側（對面）軌道：與玩家列車上下錯開，並駕齊驅時兩台都看得見 */
+  bottom: calc(var(--horizon) - 96px);
+  width: min(310px, 42vw);
+  opacity: 0.95;
+  filter: drop-shadow(0 8px 12px #00000080) grayscale(0.15);
   will-change: transform;
   animation: none;
+  z-index: 2;
 }
 .train.rival .nametag {
   position: absolute;
@@ -693,7 +708,7 @@ button:focus-visible, .line-card:focus-visible {
 
 /* ─── 倒數 ───────────────────────────────────────────── */
 .countdown {
-  position: absolute;
+  position: fixed !important; /* 蓋過 #game > * 的 position: relative，避免佔版面把排版撐開 */
   inset: 0;
   z-index: 15 !important;
   display: grid; place-items: center;
