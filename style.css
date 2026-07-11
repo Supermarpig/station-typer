@@ -196,23 +196,33 @@ button:focus-visible, .line-card:focus-visible {
 }
 .roundel.tra { border-radius: var(--radius-s); font-size: 14px; }
 
-.line-card .lc-body { min-width: 0; }
-.line-card .lc-name { font-size: 17px; font-weight: 700; }
+.line-card .lc-body { flex: 1; min-width: 0; }
+.line-card .lc-name { display: block; font-size: 17px; font-weight: 700; }
 .line-card .lc-meta {
+  display: block; /* inline 元素無法套用截斷，會溢出蓋到右側欄 */
   margin-top: 3px;
   font-size: 12px;
   color: var(--ink-mute);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.line-card .lc-best {
+.line-card .lc-side {
   margin-left: auto;
   flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  text-align: right;
+}
+.line-card .lc-best {
   font-size: 11px;
   color: var(--ink-dim);
-  text-align: right;
   line-height: 1.5;
 }
 .line-card .lc-best b { display: block; color: var(--ink-mute); font-size: 14px; font-family: var(--font-mono); }
+.lc-champ { font-size: 11px; color: #ffd97a; white-space: nowrap; }
+.lc-champ b { font-family: var(--font-mono); font-size: 12px; }
+.lc-champ:empty { display: none; }
 
 .foot-hint {
   text-align: center;

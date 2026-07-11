@@ -1,0 +1,4 @@
+# wrangler 本機開發狀態與暫存（miniflare D1、快取、bundle）
+.wrangler/
+.DS_Store
+node_modules/

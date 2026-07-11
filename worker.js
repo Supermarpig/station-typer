@@ -14,10 +14,19 @@ const json = (data, status = 200) =>
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
-    if (url.pathname !== "/api/scores") return json({ error: "not found" }, 404);
-    if (req.method === "GET") return getScores(url, env);
-    if (req.method === "POST") return postScore(req, env);
-    return json({ error: "method not allowed" }, 405);
+    if (url.pathname === "/api/scores") {
+      if (req.method === "GET") return getScores(url, env);
+      if (req.method === "POST") return postScore(req, env);
+      return json({ error: "method not allowed" }, 405);
+    }
+    if (url.pathname === "/api/champions" && req.method === "GET") {
+      // 每條路線的榜首（SQLite：GROUP BY + MAX 時裸欄位取自最大值那一列）
+      const { results } = await env.DB.prepare(
+        "SELECT line_id, name, MAX(score) AS score FROM scores GROUP BY line_id"
+      ).all();
+      return json(results);
+    }
+    return json({ error: "not found" }, 404);
   },
 };
 

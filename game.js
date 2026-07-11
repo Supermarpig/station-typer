@@ -262,10 +262,26 @@ function renderPicker() {
         <span class="lc-name">${line.zh}</span>
         <span class="lc-meta">${first} ⇄ ${last}・${line.stations.length} 站${line.note ? "・" + line.note : ""}</span>
       </span>
-      <span class="lc-best">${best ? `最佳<b>${best.score}</b>` : ""}</span>`;
+      <span class="lc-side">
+        <span class="lc-champ" data-line="${line.id}"></span>
+        <span class="lc-best">${best ? `最佳<b>${best.score}</b>` : ""}</span>
+      </span>`;
     card.addEventListener("click", () => startGame(line));
     els.lineGrid.appendChild(card);
   });
+  loadChampions();
+}
+
+/* 各路線榜首（首頁卡片上的 👑）；離線或 API 失敗時安靜略過 */
+async function loadChampions() {
+  try {
+    const rows = await fetch("/api/champions").then((r) => r.json());
+    if (!Array.isArray(rows)) return;
+    rows.forEach((r) => {
+      const el = document.querySelector(`.lc-champ[data-line="${r.line_id}"]`);
+      if (el) el.innerHTML = `👑 ${esc(r.name)} <b>${r.score | 0}</b>`;
+    });
+  } catch { /* 首頁沒有榜首資訊也能正常玩 */ }
 }
 
 /* ─── 遊戲畫面 ──────────────────────────────────────── */
