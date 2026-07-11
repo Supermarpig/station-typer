@@ -15,7 +15,7 @@ const els = {
   train: $("train"), rivalTrain: $("rivalTrain"), speedlines: $("speedlines"), sweep: $("sweep"),
   layerFar: $("layerFar"), layerNear: $("layerNear"), layerRail: $("layerRail"),
   leadChip: $("leadChip"),
-  word: $("word"), nextZh: $("nextZh"), nextEn: $("nextEn"), fxLayer: $("fxLayer"),
+  word: $("word"), nextPrefix: $("nextPrefix"), nextZh: $("nextZh"), nextEn: $("nextEn"), fxLayer: $("fxLayer"),
   statKpm: $("statKpm"), statAcc: $("statAcc"), statCombo: $("statCombo"),
   kmh: $("kmh"), gaugeFill: $("gaugeFill"),
   ghost: $("ghostInput"), imeWarn: $("imeWarn"), typingPanel: $("typingPanel"),
@@ -329,8 +329,8 @@ function startGame(line) {
   speed = 0;
   rivalX = 0;
 
-  // 累計字元數（用於賽況換算）
-  const words = line.stations.slice(1).map((s) => s.typing);
+  // 累計字元數（用於賽況換算）— 起點站也要打（發車確認），所以包含全部站名
+  const words = line.stations.map((s) => s.typing);
   state.cum = [0];
   words.forEach((w, i) => state.cum.push(state.cum[i] + w.length));
   state.totalChars = state.cum[state.cum.length - 1];
@@ -363,8 +363,8 @@ function startGame(line) {
   renderWord();
   updateStats();
 
-  if (battle && !reducedMotion) {
-    runCountdown();
+  if (!reducedMotion) {
+    runCountdown(); // 單人與對戰都倒數 3-2-1-GO
   } else {
     state.playing = true;
     focusGhost();
@@ -385,7 +385,7 @@ function runCountdown() {
         state.countdownTimers.push(setTimeout(() => {
           els.countdown.classList.add("hidden");
           state.playing = true;
-          state.startTime = performance.now(); // 對戰計時從 GO 開始
+          state.startTime = performance.now(); // 計時從 GO 開始
           focusGhost();
         }, 500));
       }
@@ -393,8 +393,11 @@ function runCountdown() {
   });
 }
 
+/* state.idx = 已完成的站名字數：打完第 k 個字 = 抵達第 k 站。
+   第 0 個字是起點站名（發車確認，列車原地不動），之後每個字前進一站。 */
 function station(i) { return state.line.stations[i]; }
-function targetStation() { return station(state.idx + 1); }
+function atStation() { return Math.min(Math.max(state.idx - 1, 0), state.line.stations.length - 1); }
+function targetStation() { return station(Math.min(state.idx, state.line.stations.length - 1)); }
 function targetWord() { return targetStation().typing; }
 function playerChars() { return state.cum[state.idx] + state.pos; }
 
@@ -479,7 +482,7 @@ function buildLeafletMap() {
 function focusMapCam(animate) {
   if (mapMode !== "leaflet" || !lMap || !state.line) return;
   const sts = state.line.stations;
-  const i = Math.min(state.idx, sts.length - 2);
+  const i = Math.min(atStation(), sts.length - 2);
   const bounds = L.latLngBounds([sts[i].pos, sts[i + 1].pos]);
   const opts = { padding: [36, 36], maxZoom: 15.5 };
   if (animate && !reducedMotion) lMap.flyToBounds(bounds, { ...opts, duration: 1.1 });
@@ -608,24 +611,32 @@ function positionMapMarkers() {
 }
 
 function playerUnits() {
-  if (state.idx >= state.line.stations.length - 1) return state.idx;
-  return state.idx + state.pos / targetWord().length;
+  const n = state.line.stations.length;
+  if (state.idx === 0) return 0; // 還在打起點站：原地待發
+  if (state.idx >= n) return n - 1;
+  return state.idx - 1 + state.pos / targetWord().length;
 }
 
 function rivalUnits() {
+  const n = state.line.stations.length;
   const i = state.rival.idx;
-  const wLen = (state.cum[i + 1] || 0) - state.cum[i] || 1;
-  return Math.min(i + (state.rival.chars - state.cum[i]) / wLen, state.line.stations.length - 1);
+  if (i === 0) return 0;
+  if (i >= n) return n - 1;
+  const wLen = state.cum[i + 1] - state.cum[i] || 1;
+  return Math.min(i - 1 + (state.rival.chars - state.cum[i]) / wLen, n - 1);
 }
 
 function updateMapHead(animate) {
   const line = state.line;
-  const cur = station(state.idx);
-  const next = state.idx < line.stations.length - 1 ? station(state.idx + 1) : null;
+  const n = line.stations.length;
+  const cur = station(atStation());
   els.mapRoundel.textContent = cur.code || line.badge;
   els.mapRoundel.classList.toggle("tra", line.operator === "tra");
   els.mapNow.textContent = cur.zh;
-  els.mapDir.textContent = next ? `往 ${next.zh} ▶` : "終點站 TERMINAL";
+  els.mapDir.textContent =
+    state.idx === 0 ? "準備發車 DEPART" :
+    state.idx >= n ? "終點站 TERMINAL" :
+    `往 ${station(state.idx).zh} ▶`;
   updateMapDots();
   focusMapCam(animate);
   if (animate && !reducedMotion) {
@@ -639,34 +650,36 @@ function updateMapHead(animate) {
 }
 
 function updateMapDots() {
+  const nAll = state.line.stations.length;
+  const cur = atStation();                       // 列車目前所在站
+  const nxt = Math.min(state.idx, nAll - 1);     // 正在打的目標站
   if (mapMode === "leaflet") {
     if (!lRefs.dots.length) return;
     const sts = state.line.stations;
-    const n = sts.length;
     lRefs.dots.forEach((c, i) => {
-      const done = i < state.idx, now = i === state.idx;
+      const done = i < cur, now = i === cur;
       c.setStyle({
         color: now ? "#ffffff" : done ? state.line.color : "#dfe6f5",
         fillColor: now ? "#ffffff" : done ? state.line.color : "#0b0f1a",
       });
       c.setRadius(now ? 7 : 5);
-      const perm = i === 0 || i === n - 1 || i === state.idx || i === state.idx + 1;
+      const perm = i === 0 || i === nAll - 1 || i === cur || i === nxt;
       c.unbindTooltip();
       c.bindTooltip(sts[i].zh, {
         permanent: perm,
         direction: "top",
         offset: [0, -6],
-        className: "m-tip" + (i === state.idx ? " now" : i === state.idx + 1 ? " next" : ""),
+        className: "m-tip" + (i === cur ? " now" : i === nxt ? " next" : ""),
       });
     });
     return;
   }
   mSvg.dots.forEach((d, i) => {
-    d.setAttribute("class", "m-dot" + (i < state.idx ? " done" : i === state.idx ? " now" : ""));
+    d.setAttribute("class", "m-dot" + (i < cur ? " done" : i === cur ? " now" : ""));
   });
   mSvg.names.forEach((nm, i) => {
-    const stateCls = i < state.idx ? " done" : i === state.idx ? " now" : i === state.idx + 1 ? " next" : "";
-    const hide = mapSparse[i] && i !== state.idx && i !== state.idx + 1 ? " off" : "";
+    const stateCls = i < cur ? " done" : i === cur ? " now" : i === nxt ? " next" : "";
+    const hide = mapSparse[i] && i !== cur && i !== nxt ? " off" : "";
     nm.setAttribute("class", "m-name" + stateCls + hide);
   });
 }
@@ -681,6 +694,7 @@ function updateLeadChip() {
 function renderWord() {
   if (state.finished) return;
   const next = targetStation();
+  els.nextPrefix.textContent = state.idx === 0 ? "起點站" : "下一站";
   els.nextZh.textContent = next.zh;
   els.nextEn.textContent = next.en;
   const w = targetWord();
@@ -816,7 +830,7 @@ function arrive() {
   state.pos = 0;
   updateMapHead(true);
   if (state.mode === "battle") updateLeadChip();
-  if (state.idx >= state.line.stations.length - 1) {
+  if (state.idx >= state.line.stations.length) {
     finish(true);
   } else {
     SFX.chime();
@@ -918,7 +932,7 @@ function finish(playerWon) {
       : `被 ${state.rivalDef.name} 搶先抵達${station(state.line.stations.length - 1).zh}`;
   } else {
     $("resultEyebrow").textContent = "終點站 TERMINAL";
-    h2.textContent = station(state.idx).zh;
+    h2.textContent = station(atStation()).zh;
     $("resultLine").textContent = `${state.line.zh}全線 ${state.line.stations.length} 站完乘`;
   }
 
