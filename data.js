@@ -46,6 +46,7 @@ const LINES = [
     darkText: false,
     operator: "metro",
     stations: [
+      { code: "R01", zh: "廣慈/奉天宮", en: "Guangci/Fengtian Temple", pos: [25.031, 121.583] },
       { code: "R02", zh: "象山", en: "Xiangshan", pos: [25.033, 121.570] },
       { code: "R03", zh: "台北101/世貿", en: "Taipei 101 World Trade Center", pos: [25.033, 121.563] },
       { code: "R04", zh: "信義安和", en: "Xinyi Anhe", pos: [25.033, 121.553] },
