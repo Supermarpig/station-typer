@@ -46,7 +46,7 @@ const LINES = [
     darkText: false,
     operator: "metro",
     stations: [
-      { code: "R01", zh: "廣慈/奉天宮", en: "Guangci/Fengtian Temple", pos: [25.0298, 121.5805] }, // 福德街×大道路口・廣慈博愛園區
+      { code: "R01", zh: "廣慈/奉天宮", en: "Guangci/Fengtian Temple", pos: [25.0328, 121.5765] }, // 廣慈博愛園區・福德街
       { code: "R02", zh: "象山", en: "Xiangshan", pos: [25.033, 121.570] },
       { code: "R03", zh: "台北101/世貿", en: "Taipei 101 World Trade Center", pos: [25.033, 121.563] },
       { code: "R04", zh: "信義安和", en: "Xinyi Anhe", pos: [25.033, 121.553] },
