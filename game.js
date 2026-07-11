@@ -1,0 +1,980 @@
+/* 站名英打 — 遊戲邏輯
+   核心手法：視差圖層用 Web Animations API 無限循環位移，
+   打字節奏換算成 playbackRate → 列車絲滑加減速（全程只動 transform/opacity）。
+   對戰模式：AI 對手以固定 KPM（含隨機起伏）推進，同場景賽跑。 */
+
+const $ = (id) => document.getElementById(id);
+
+const els = {
+  picker: $("picker"), game: $("game"), overlay: $("overlay"),
+  pickerBg: $("pickerBg"), lineGrid: $("lineGrid"), lineChip: $("lineChip"),
+  modeSolo: $("modeSolo"), modeBattle: $("modeBattle"), rivalRow: $("rivalRow"),
+  mapHead: $("mapHead"), mapRoundel: $("mapRoundel"), mapNow: $("mapNow"), mapDir: $("mapDir"),
+  mapView: $("mapView"),
+  scene: $("scene"), sceneShake: $("sceneShake"),
+  train: $("train"), rivalTrain: $("rivalTrain"), speedlines: $("speedlines"), sweep: $("sweep"),
+  layerFar: $("layerFar"), layerNear: $("layerNear"), layerRail: $("layerRail"),
+  leadChip: $("leadChip"),
+  word: $("word"), nextZh: $("nextZh"), nextEn: $("nextEn"), fxLayer: $("fxLayer"),
+  statKpm: $("statKpm"), statAcc: $("statAcc"), statCombo: $("statCombo"),
+  kmh: $("kmh"), gaugeFill: $("gaugeFill"),
+  ghost: $("ghostInput"), imeWarn: $("imeWarn"), typingPanel: $("typingPanel"),
+  countdown: $("countdown"),
+  backBtn: $("backBtn"), retryBtn: $("retryBtn"), pickBtn: $("pickBtn"),
+  muteBtn: $("muteBtn"),
+};
+
+const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+const RIVALS = [
+  { id: "local", name: "區間車", desc: "慢速巡航", kpm: 140, color: "#4aa3ff" },
+  { id: "tze", name: "自強號", desc: "穩定快攻", kpm: 300, color: "#ff9f43" },
+  { id: "taroko", name: "太魯閣號", desc: "極速狂飆", kpm: 460, color: "#ff475f" },
+];
+
+const MAX_SPEED = 3;
+const GAUGE_LEN = 88;
+
+/* ─── 場景圖層（SVG 條帶，寬 900，重複鋪滿 + 循環位移）── */
+const STRIP_W = 900;
+
+function seededRng(seed) {
+  return () => {
+    seed = (seed * 9301 + 49297) % 233280;
+    return seed / 233280;
+  };
+}
+
+function farStripSVG() {
+  const rnd = seededRng(7);
+  let rects = "";
+  let x = 0;
+  while (x < STRIP_W - 60) {
+    const w = 34 + Math.floor(rnd() * 56);
+    const h = 50 + Math.floor(rnd() * 110);
+    if (x < 480 || x > 660) rects += `<rect x="${x}" y="${230 - h}" width="${w}" height="${h}"/>`;
+    x += w + 8 + Math.floor(rnd() * 26);
+  }
+  // 台北 101：基座 + 八節斗形 + 尖塔
+  let tower = `<rect x="534" y="168" width="34" height="62"/>`;
+  for (let s = 0; s < 8; s++) {
+    const yb = 168 - s * 12, yt = yb - 12;
+    tower += `<path d="M537 ${yb} L565 ${yb} L561 ${yt} L541 ${yt} Z"/>`;
+  }
+  tower += `<rect x="544" y="62" width="14" height="10"/><rect x="549" y="30" width="4" height="32"/>`;
+  return `<svg width="${STRIP_W}" height="230" viewBox="0 0 ${STRIP_W} 230" xmlns="http://www.w3.org/2000/svg" fill="#18213a">${rects}${tower}</svg>`;
+}
+
+function nearStripSVG() {
+  const rnd = seededRng(23);
+  const neon = ["#ffd97a", "#ffd97a", "#ffd97a", "#7ae2ff", "#ff9ecb"];
+  let out = "";
+  let x = 10;
+  while (x < STRIP_W - 90) {
+    const w = 58 + Math.floor(rnd() * 62);
+    const h = 62 + Math.floor(rnd() * 92);
+    const top = 190 - h;
+    out += `<rect x="${x}" y="${top}" width="${w}" height="${h}" fill="#212b45"/>`;
+    if (rnd() < 0.3) out += `<circle cx="${x + 6}" cy="${top - 4}" r="2" fill="#ff5d5d" opacity="0.85"/>`;
+    for (let wy = top + 10; wy < 178; wy += 16) {
+      for (let wx = x + 8; wx < x + w - 10; wx += 15) {
+        if (rnd() < 0.42) {
+          const c = neon[Math.floor(rnd() * neon.length)];
+          out += `<rect x="${wx}" y="${wy}" width="6" height="8" fill="${c}" opacity="${0.35 + rnd() * 0.5}"/>`;
+        }
+      }
+    }
+    x += w + 14 + Math.floor(rnd() * 40);
+  }
+  return `<svg width="${STRIP_W}" height="190" viewBox="0 0 ${STRIP_W} 190" xmlns="http://www.w3.org/2000/svg">${out}</svg>`;
+}
+
+function railStripSVG() {
+  let ticks = "";
+  for (let x = 0; x < STRIP_W; x += 30) ticks += `<rect x="${x}" y="30" width="12" height="4" fill="#1c2438"/>`;
+  let pillars = "";
+  for (let x = 40; x < STRIP_W; x += 180) {
+    pillars += `<rect x="${x - 7}" y="46" width="32" height="8" fill="#2a3552"/><rect x="${x}" y="52" width="18" height="78" fill="#222c48"/>`;
+  }
+  return `<svg width="${STRIP_W}" height="130" viewBox="0 0 ${STRIP_W} 130" xmlns="http://www.w3.org/2000/svg">
+    ${pillars}
+    <rect x="0" y="20" width="${STRIP_W}" height="26" fill="#2e3a58"/>
+    <rect x="0" y="20" width="${STRIP_W}" height="4" fill="#3d4a6e"/>
+    <rect x="0" y="24" width="${STRIP_W}" height="2" fill="#55648c"/>
+    ${ticks}
+  </svg>`;
+}
+
+function trainSVG(stripe = "var(--line)") {
+  return `<svg viewBox="0 0 300 86" xmlns="http://www.w3.org/2000/svg">
+    <rect x="20" y="66" width="52" height="12" rx="4" fill="#161b26"/>
+    <rect x="196" y="66" width="52" height="12" rx="4" fill="#161b26"/>
+    <path d="M8 74 L8 24 Q8 10 24 10 L252 10 Q282 10 294 40 L298 58 Q300 70 288 72 L8 74 Z" fill="#e8ecf2"/>
+    <path d="M8 58 L292 58 L296 66 Q298 71 290 71 L8 71 Z" fill="${stripe}"/>
+    <rect x="24" y="22" width="42" height="24" rx="5" fill="#1d2c45"/>
+    <rect x="76" y="22" width="42" height="24" rx="5" fill="#1d2c45"/>
+    <rect x="128" y="22" width="42" height="24" rx="5" fill="#1d2c45"/>
+    <rect x="180" y="22" width="42" height="24" rx="5" fill="#1d2c45"/>
+    <path d="M252 14 Q276 16 288 42 L290 50 L248 50 L248 14 Z" fill="#1d2c45"/>
+    <circle cx="287" cy="62" r="4" fill="#ffe9a8"/>
+    <rect x="70" y="12" width="3" height="60" fill="#c9d1dd"/>
+    <rect x="122" y="12" width="3" height="60" fill="#c9d1dd"/>
+    <rect x="174" y="12" width="3" height="60" fill="#c9d1dd"/>
+  </svg><div class="headlight"></div>`;
+}
+
+/* 各圖層基準時長（playbackRate = 1 時跑完一段 900px 的秒數） */
+const LAYERS = [
+  { el: null, key: "layerFar", svg: farStripSVG, dur: 90000 },
+  { el: null, key: "layerNear", svg: nearStripSVG, dur: 34000 },
+  { el: null, key: "layerRail", svg: railStripSVG, dur: 7000 },
+];
+const SPEEDLINE_DUR = 2400;
+
+let layerAnims = [];
+
+function buildScene() {
+  layerAnims.forEach((a) => a.cancel());
+  layerAnims = [];
+  const copies = Math.ceil(innerWidth / STRIP_W) + 1;
+  LAYERS.forEach((l) => {
+    const el = els[l.key];
+    el.innerHTML = Array.from({ length: copies }, l.svg).join("");
+    if (!reducedMotion) {
+      const anim = el.animate(
+        [{ transform: "translate3d(0,0,0)" }, { transform: `translate3d(-${STRIP_W}px,0,0)` }],
+        { duration: l.dur, iterations: Infinity }
+      );
+      anim.playbackRate = 0;
+      layerAnims.push(anim);
+    }
+  });
+  if (!reducedMotion) {
+    const anim = els.speedlines.animate(
+      [{ transform: "translate3d(0,0,0)" }, { transform: "translate3d(-300px,0,0)" }],
+      { duration: SPEEDLINE_DUR, iterations: Infinity }
+    );
+    anim.playbackRate = 0;
+    layerAnims.push(anim);
+  }
+}
+els.train.innerHTML = trainSVG();
+
+/* ─── 遊戲狀態 ──────────────────────────────────────── */
+const state = {
+  line: null,
+  mode: "solo",
+  rivalDef: RIVALS[1],
+  idx: 0,          // 目前所在站
+  pos: 0,          // 目前單字打到第幾個字元
+  correct: 0,
+  errors: 0,
+  combo: 0,
+  maxCombo: 0,
+  startTime: 0,
+  keyTimes: [],
+  finished: false,
+  playing: false,
+  cum: [],          // 各單字前的累計字元數
+  totalChars: 0,
+  rival: { chars: 0, idx: 0 },
+  countdownTimers: [],
+};
+
+let speed = 0;
+let rivalX = 0;
+let frame = 0;
+
+/* 地理路線圖狀態 */
+let mapMode = "svg";   // "leaflet"：真實地圖底圖；"svg"：離線備援（純形狀）
+let mapPts = [];       // 各站的 SVG 座標（真實經緯度投影）
+let mapCum = [];       // 沿路線的累計長度
+let mapTotalLen = 0;
+let mapU = 0, mapRivalU = 0;
+let mapSparse = [];    // 擁擠時隱藏部分站名
+const mSvg = { fill: null, train: null, rival: null, dots: [], names: [] };
+let lMap = null, lLayer = null;
+const lRefs = { done: null, dots: [], train: null, rival: null };
+
+/* ─── 路線選擇畫面 ──────────────────────────────────── */
+const pickerState = { mode: "solo", rivalId: "tze" };
+
+function bestKey(lineId) { return `stationTyper.best.${lineId}`; }
+
+function renderPickerBg() {
+  const copies = Math.ceil(innerWidth / STRIP_W) + 1;
+  els.pickerBg.innerHTML = Array.from({ length: copies }, farStripSVG).join("");
+}
+
+function renderRivals() {
+  els.rivalRow.innerHTML = "";
+  RIVALS.forEach((r) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "rival-chip" + (r.id === pickerState.rivalId ? " active" : "");
+    chip.style.setProperty("--rc", r.color);
+    chip.innerHTML = `${r.name}<small>${r.desc}・${r.kpm} KPM</small>`;
+    chip.addEventListener("click", () => {
+      pickerState.rivalId = r.id;
+      renderRivals();
+    });
+    els.rivalRow.appendChild(chip);
+  });
+}
+
+function setMode(mode) {
+  pickerState.mode = mode;
+  els.modeSolo.classList.toggle("active", mode === "solo");
+  els.modeBattle.classList.toggle("active", mode === "battle");
+  els.rivalRow.classList.toggle("hidden", mode !== "battle");
+}
+
+els.modeSolo.addEventListener("click", () => setMode("solo"));
+els.modeBattle.addEventListener("click", () => setMode("battle"));
+
+function renderPicker() {
+  els.lineGrid.innerHTML = "";
+  LINES.forEach((line) => {
+    const first = line.stations[0].zh;
+    const last = line.stations[line.stations.length - 1].zh;
+    const best = JSON.parse(localStorage.getItem(bestKey(line.id)) || "null");
+    const card = document.createElement("button");
+    card.className = "line-card";
+    card.type = "button";
+    card.style.setProperty("--lc", line.color);
+    card.style.setProperty("--lc-ink", line.darkText ? "#20242c" : "#ffffff");
+    card.innerHTML = `
+      <span class="roundel ${line.operator === "tra" ? "tra" : ""}">${line.badge}</span>
+      <span class="lc-body">
+        <span class="lc-name">${line.zh}</span>
+        <span class="lc-meta">${first} ⇄ ${last}・${line.stations.length} 站${line.note ? "・" + line.note : ""}</span>
+      </span>
+      <span class="lc-best">${best ? `最佳<b>${best.score}</b>` : ""}</span>`;
+    card.addEventListener("click", () => startGame(line));
+    els.lineGrid.appendChild(card);
+  });
+}
+
+/* ─── 遊戲畫面 ──────────────────────────────────────── */
+function startGame(line) {
+  state.line = line;
+  state.mode = pickerState.mode;
+  state.rivalDef = RIVALS.find((r) => r.id === pickerState.rivalId) || RIVALS[1];
+  state.idx = 0;
+  state.pos = 0;
+  state.correct = 0;
+  state.errors = 0;
+  state.combo = 0;
+  state.maxCombo = 0;
+  state.startTime = 0;
+  state.keyTimes = [];
+  state.finished = false;
+  state.playing = false;
+  state.rival = { chars: 0, idx: 0 };
+  state.countdownTimers.forEach(clearTimeout);
+  state.countdownTimers = [];
+  speed = 0;
+  rivalX = 0;
+
+  // 累計字元數（用於賽況換算）
+  const words = line.stations.slice(1).map((s) => s.typing);
+  state.cum = [0];
+  words.forEach((w, i) => state.cum.push(state.cum[i] + w.length));
+  state.totalChars = state.cum[state.cum.length - 1];
+
+  document.documentElement.style.setProperty("--line", line.color);
+  document.documentElement.style.setProperty("--line-ink", line.darkText ? "#20242c" : "#ffffff");
+
+  els.picker.classList.add("hidden");
+  els.overlay.classList.add("hidden");
+  els.game.classList.remove("hidden");
+
+  els.lineChip.innerHTML = `
+    <span class="roundel ${line.operator === "tra" ? "tra" : ""}"
+          style="--lc:${line.color};--lc-ink:${line.darkText ? "#20242c" : "#fff"}">${line.badge}</span>
+    <span>${line.zh}</span>`;
+
+  const battle = state.mode === "battle";
+  els.rivalTrain.classList.toggle("hidden", !battle);
+  els.leadChip.classList.toggle("hidden", !battle);
+  if (battle) {
+    els.rivalTrain.innerHTML = trainSVG("#94a3b8") + `<div class="nametag">${state.rivalDef.name}</div>`;
+    els.rivalTrain.style.transform = "translate3d(0,0,0)";
+    els.leadChip.textContent = "並駕齊驅";
+    els.leadChip.classList.remove("behind");
+  }
+
+  buildScene();
+  buildMap();
+  updateMapHead(false);
+  renderWord();
+  updateStats();
+
+  if (battle && !reducedMotion) {
+    runCountdown();
+  } else {
+    state.playing = true;
+    focusGhost();
+  }
+}
+
+function runCountdown() {
+  const seq = ["3", "2", "1", "GO"];
+  els.countdown.classList.remove("hidden");
+  seq.forEach((txt, i) => {
+    state.countdownTimers.push(setTimeout(() => {
+      els.countdown.textContent = txt;
+      els.countdown.classList.remove("tick");
+      void els.countdown.offsetWidth;
+      els.countdown.classList.add("tick");
+      SFX.count(txt === "GO");
+      if (txt === "GO") {
+        state.countdownTimers.push(setTimeout(() => {
+          els.countdown.classList.add("hidden");
+          state.playing = true;
+          state.startTime = performance.now(); // 對戰計時從 GO 開始
+          focusGhost();
+        }, 500));
+      }
+    }, i * 700));
+  });
+}
+
+function station(i) { return state.line.stations[i]; }
+function targetStation() { return station(state.idx + 1); }
+function targetWord() { return targetStation().typing; }
+function playerChars() { return state.cum[state.idx] + state.pos; }
+
+/* ─── 地理路線圖（真實經緯度）──────────────────────── */
+function buildMap() {
+  if (ensureLeaflet()) buildLeafletMap();
+  else buildMapSVG();
+}
+
+function ensureLeaflet() {
+  if (!window.L) return false;
+  if (!lMap) {
+    els.mapView.innerHTML = "";
+    els.mapView.classList.add("leaflet-mode");
+    lMap = L.map(els.mapView, {
+      zoomControl: false,
+      keyboard: false,
+      zoomSnap: 0.25,
+      zoomAnimation: false,
+      fadeAnimation: false,
+      markerZoomAnimation: false,
+    });
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+      attribution: "&copy; OpenStreetMap &copy; CARTO",
+      subdomains: "abcd",
+      maxZoom: 19,
+    }).addTo(lMap);
+    lMap.attributionControl.setPrefix(false);
+  }
+  return true;
+}
+
+function buildLeafletMap() {
+  mapMode = "leaflet";
+  mapPts = [];
+  const sts = state.line.stations;
+  const latlngs = sts.map((s) => s.pos);
+  if (lLayer) lLayer.remove();
+  lLayer = L.layerGroup().addTo(lMap);
+
+  L.polyline(latlngs, { color: "#ffffff", opacity: 0.28, weight: 9 }).addTo(lLayer); // 白色襯底
+  L.polyline(latlngs, { color: "#aebadd", opacity: 0.85, weight: 4.5 }).addTo(lLayer);
+  lRefs.done = L.polyline([latlngs[0]], { color: state.line.color, weight: 6, opacity: 1 }).addTo(lLayer);
+
+  lRefs.dots = latlngs.map((p) =>
+    L.circleMarker(p, { radius: 5, weight: 2.5, color: "#dfe6f5", fillColor: "#0b0f1a", fillOpacity: 1 }).addTo(lLayer)
+  );
+
+  const trainIcon = L.divIcon({
+    className: "m-train-icon",
+    html: `<div class="chip" style="--c:${state.line.color}"></div>`,
+    iconSize: [20, 14],
+    iconAnchor: [10, 7],
+  });
+  lRefs.train = L.marker(latlngs[0], { icon: trainIcon, interactive: false, zIndexOffset: 1000 }).addTo(lLayer);
+
+  if (state.mode === "battle") {
+    const rivalIcon = L.divIcon({
+      className: "m-train-icon rival",
+      html: `<div class="chip" style="--c:#ff475f"></div>`,
+      iconSize: [16, 11],
+      iconAnchor: [8, 5.5],
+    });
+    lRefs.rival = L.marker(latlngs[0], { icon: rivalIcon, interactive: false, zIndexOffset: 900 }).addTo(lLayer);
+  } else {
+    lRefs.rival = null;
+  }
+
+  // 畫面剛從 hidden 顯示，需重算尺寸再取景
+  // （用 setTimeout 而非 rAF：背景分頁的 rAF 會被暫停）
+  setTimeout(() => {
+    lMap.invalidateSize({ animate: false });
+    lMap.fitBounds(L.latLngBounds(latlngs), { padding: [28, 28], animate: false });
+  }, 30);
+
+  mapU = playerUnits();
+  mapRivalU = 0;
+  updateMapDots();
+}
+
+function latLngAt(u) {
+  const sts = state.line.stations;
+  const c = Math.max(0, Math.min(u, sts.length - 1));
+  const i = Math.min(Math.floor(c), sts.length - 2);
+  const t = c - i;
+  const a = sts[i].pos, b = sts[i + 1].pos;
+  return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+}
+
+function buildMapSVG() {
+  mapMode = "svg";
+  const sts = state.line.stations;
+  const n = sts.length;
+  const W = Math.max(320, els.mapView.clientWidth || 960);
+
+  // 經緯度 → 平面（經度乘上緯度餘弦修正比例）
+  const raw = sts.map((s) => ({
+    x: s.pos[1] * Math.cos((s.pos[0] * Math.PI) / 180),
+    y: -s.pos[0],
+  }));
+  // 以起訖站連線為主軸旋轉（純旋轉、不鏡射 → 形狀保真，起點在左）
+  const a = raw[0], b = raw[n - 1];
+  const ang = Math.atan2(b.y - a.y, b.x - a.x);
+  const cos = Math.cos(-ang), sin = Math.sin(-ang);
+  const rot = raw.map((p) => ({
+    x: (p.x - a.x) * cos - (p.y - a.y) * sin,
+    y: (p.x - a.x) * sin + (p.y - a.y) * cos,
+  }));
+  // 等比縮放置中
+  const xs = rot.map((p) => p.x), ys = rot.map((p) => p.y);
+  const minX = Math.min(...xs), minY = Math.min(...ys);
+  const bw = Math.max(Math.max(...xs) - minX, 1e-9);
+  const bh = Math.max(Math.max(...ys) - minY, 1e-9);
+  const padX = 52, padTop = 26, padBot = 72;
+  const maxContentH = Math.min(200, W * 0.4);
+  const scale = Math.min((W - padX * 2) / bw, maxContentH / bh);
+  const offX = (W - bw * scale) / 2;
+  const viewH = bh * scale + padTop + padBot;
+  mapPts = rot.map((p) => ({
+    x: offX + (p.x - minX) * scale,
+    y: padTop + (p.y - minY) * scale,
+  }));
+
+  // 沿線累計長度（列車位置與進度填色用）
+  mapCum = [0];
+  for (let i = 1; i < n; i++) {
+    mapCum.push(mapCum[i - 1] + Math.hypot(mapPts[i].x - mapPts[i - 1].x, mapPts[i].y - mapPts[i - 1].y));
+  }
+  mapTotalLen = mapCum[n - 1];
+
+  // 依實際間距決定站名顯示：離上一個顯示的站名太近就隱藏
+  // （起訖站必顯示；當前站與下一站在 updateMapDots 裡永遠顯示）
+  mapSparse = new Array(n).fill(false);
+  let lastKept = 0;
+  for (let i = 1; i < n; i++) {
+    const d = Math.hypot(mapPts[i].x - mapPts[lastKept].x, mapPts[i].y - mapPts[lastKept].y);
+    if (d < 24 && i !== n - 1) mapSparse[i] = true;
+    else lastKept = i;
+  }
+
+  const d = mapPts.map((p, i) => `${i ? "L" : "M"}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ");
+  const dots = mapPts
+    .map((p) => `<circle class="m-dot" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="4.5"/>`)
+    .join("");
+  const names = mapPts
+    .map((p, i) => {
+      const tx = (p.x + 5).toFixed(1), ty = (p.y + 14).toFixed(1);
+      return `<text class="m-name" x="${tx}" y="${ty}" transform="rotate(42 ${tx} ${ty})">${sts[i].zh}</text>`;
+    })
+    .join("");
+
+  els.mapView.innerHTML = `
+    <svg viewBox="0 0 ${W} ${viewH.toFixed(0)}" xmlns="http://www.w3.org/2000/svg">
+      <path class="m-line" d="${d}"/>
+      <path class="m-fill" id="mFill" d="${d}" stroke-dasharray="${mapTotalLen.toFixed(1)}" stroke-dashoffset="${mapTotalLen.toFixed(1)}"/>
+      <g id="mDots">${dots}</g>
+      <g id="mNames">${names}</g>
+      <g id="mRival" class="m-train rival${state.mode === "battle" ? "" : " hidden"}">
+        <rect x="-7" y="-5.5" width="14" height="11" rx="3.5" fill="#ff475f" stroke="#fff" stroke-width="1.5"/>
+        <rect x="-4" y="-2.5" width="8" height="4" rx="1.5" fill="#0b0f1a"/>
+      </g>
+      <g id="mTrain" class="m-train">
+        <rect x="-9" y="-7" width="18" height="14" rx="4.5" fill="${state.line.color}" stroke="#fff" stroke-width="2"/>
+        <rect x="-5" y="-3" width="10" height="4.5" rx="1.5" fill="#0b0f1a"/>
+      </g>
+    </svg>`;
+
+  mSvg.fill = $("mFill");
+  mSvg.train = $("mTrain");
+  mSvg.rival = $("mRival");
+  mSvg.dots = [...els.mapView.querySelectorAll(".m-dot")];
+  mSvg.names = [...els.mapView.querySelectorAll(".m-name")];
+  mapU = playerUnits();
+  mapRivalU = 0;
+  positionMapMarkers();
+  updateMapDots();
+}
+
+function mapPointAt(u) {
+  const n = mapPts.length;
+  const c = Math.max(0, Math.min(u, n - 1));
+  const i = Math.min(Math.floor(c), n - 2);
+  const t = c - i;
+  return {
+    x: mapPts[i].x + (mapPts[i + 1].x - mapPts[i].x) * t,
+    y: mapPts[i].y + (mapPts[i + 1].y - mapPts[i].y) * t,
+    len: mapCum[i] + (mapCum[i + 1] - mapCum[i]) * t,
+  };
+}
+
+function positionMapMarkers() {
+  if (!mapPts.length) return;
+  const p = mapPointAt(mapU);
+  mSvg.train.setAttribute("transform", `translate(${p.x.toFixed(1)} ${p.y.toFixed(1)})`);
+  mSvg.fill.setAttribute("stroke-dashoffset", Math.max(0, mapTotalLen - p.len).toFixed(1));
+  if (state.mode === "battle") {
+    const r = mapPointAt(mapRivalU);
+    mSvg.rival.setAttribute("transform", `translate(${r.x.toFixed(1)} ${r.y.toFixed(1)})`);
+  }
+}
+
+function playerUnits() {
+  if (state.idx >= state.line.stations.length - 1) return state.idx;
+  return state.idx + state.pos / targetWord().length;
+}
+
+function rivalUnits() {
+  const i = state.rival.idx;
+  const wLen = (state.cum[i + 1] || 0) - state.cum[i] || 1;
+  return Math.min(i + (state.rival.chars - state.cum[i]) / wLen, state.line.stations.length - 1);
+}
+
+function updateMapHead(animate) {
+  const line = state.line;
+  const cur = station(state.idx);
+  const next = state.idx < line.stations.length - 1 ? station(state.idx + 1) : null;
+  els.mapRoundel.textContent = cur.code || line.badge;
+  els.mapRoundel.classList.toggle("tra", line.operator === "tra");
+  els.mapNow.textContent = cur.zh;
+  els.mapDir.textContent = next ? `往 ${next.zh} ▶` : "終點站 TERMINAL";
+  updateMapDots();
+  if (animate && !reducedMotion) {
+    els.mapHead.classList.remove("arrive");
+    void els.mapHead.offsetWidth;
+    els.mapHead.classList.add("arrive");
+    els.sweep.classList.remove("go");
+    void els.sweep.offsetWidth;
+    els.sweep.classList.add("go");
+  }
+}
+
+function updateMapDots() {
+  if (mapMode === "leaflet") {
+    if (!lRefs.dots.length) return;
+    const sts = state.line.stations;
+    const n = sts.length;
+    lRefs.dots.forEach((c, i) => {
+      const done = i < state.idx, now = i === state.idx;
+      c.setStyle({
+        color: now ? "#ffffff" : done ? state.line.color : "#dfe6f5",
+        fillColor: now ? "#ffffff" : done ? state.line.color : "#0b0f1a",
+      });
+      c.setRadius(now ? 7 : 5);
+      const perm = i === 0 || i === n - 1 || i === state.idx || i === state.idx + 1;
+      c.unbindTooltip();
+      c.bindTooltip(sts[i].zh, {
+        permanent: perm,
+        direction: "top",
+        offset: [0, -6],
+        className: "m-tip" + (i === state.idx ? " now" : i === state.idx + 1 ? " next" : ""),
+      });
+    });
+    return;
+  }
+  mSvg.dots.forEach((d, i) => {
+    d.setAttribute("class", "m-dot" + (i < state.idx ? " done" : i === state.idx ? " now" : ""));
+  });
+  mSvg.names.forEach((nm, i) => {
+    const stateCls = i < state.idx ? " done" : i === state.idx ? " now" : i === state.idx + 1 ? " next" : "";
+    const hide = mapSparse[i] && i !== state.idx && i !== state.idx + 1 ? " off" : "";
+    nm.setAttribute("class", "m-name" + stateCls + hide);
+  });
+}
+
+function updateLeadChip() {
+  const diff = state.idx - state.rival.idx;
+  els.leadChip.classList.toggle("behind", diff < 0);
+  els.leadChip.textContent =
+    diff > 0 ? `領先 ${diff} 站` : diff < 0 ? `落後 ${-diff} 站` : "並駕齊驅";
+}
+
+function renderWord() {
+  if (state.finished) return;
+  const next = targetStation();
+  els.nextZh.textContent = next.zh;
+  els.nextEn.textContent = next.en;
+  const w = targetWord();
+  els.word.innerHTML = [...w]
+    .map((ch, i) => {
+      const cls = ["ch"];
+      if (ch === " ") cls.push("sp");
+      if (i < state.pos) cls.push("done");
+      else if (i === state.pos) cls.push("cur");
+      return `<span class="${cls.join(" ")}">${ch === " " ? "&nbsp;" : ch}</span>`;
+    })
+    .join("");
+}
+
+function updateStats() {
+  const mins = state.startTime ? (performance.now() - state.startTime) / 60000 : 0;
+  const kpm = mins > 0.005 ? Math.round(state.correct / mins) : 0;
+  const total = state.correct + state.errors;
+  const acc = total ? Math.round((state.correct / total) * 100) : 100;
+  els.statKpm.textContent = kpm;
+  els.statAcc.textContent = acc + "%";
+  els.statCombo.textContent = state.combo;
+}
+
+/* ─── 特效 ──────────────────────────────────────────── */
+function spawnSpark(x, y, dx, dy) {
+  if (reducedMotion || els.fxLayer.childElementCount > 16) return;
+  const s = document.createElement("span");
+  s.className = "spark";
+  s.style.left = x + "px";
+  s.style.top = y + "px";
+  s.style.setProperty("--dx", dx + "px");
+  s.style.setProperty("--dy", dy + "px");
+  s.addEventListener("animationend", () => s.remove());
+  els.fxLayer.appendChild(s);
+}
+
+function caretSpark() {
+  const chEls = els.word.querySelectorAll(".ch");
+  const el = chEls[Math.max(0, state.pos - 1)];
+  if (!el) return;
+  const fx = els.fxLayer.getBoundingClientRect();
+  const r = el.getBoundingClientRect();
+  spawnSpark(r.left + r.width / 2 - fx.left, r.top - fx.top, (Math.random() - 0.5) * 22, -20 - Math.random() * 16);
+}
+
+function wordBurst() {
+  const fx = els.fxLayer.getBoundingClientRect();
+  const r = els.word.getBoundingClientRect();
+  const cx = r.left + r.width / 2 - fx.left;
+  const cy = r.top + r.height / 2 - fx.top;
+  for (let i = 0; i < 10; i++) {
+    const a = (i / 10) * Math.PI * 2;
+    spawnSpark(cx, cy, Math.cos(a) * 44, Math.sin(a) * 34 - 10);
+  }
+}
+
+function comboFloat(text) {
+  if (reducedMotion) return;
+  const f = document.createElement("span");
+  f.className = "combo-float";
+  f.textContent = text;
+  f.style.left = "50%";
+  f.style.top = "18px";
+  f.addEventListener("animationend", () => f.remove());
+  els.fxLayer.appendChild(f);
+}
+
+/* ─── 打字處理 ──────────────────────────────────────── */
+function handleChar(ch) {
+  if (!state.playing || state.finished || ch.length !== 1) return;
+  ch = ch.toLowerCase();
+  if (!/[a-z0-9 ]/.test(ch)) return;
+
+  if (!state.startTime) state.startTime = performance.now();
+  const w = targetWord();
+  const expected = w[state.pos];
+
+  let ok = false;
+  if (ch === expected) {
+    state.pos += 1;
+    ok = true;
+  } else if (expected === " " && ch === w[state.pos + 1]) {
+    state.pos += 2; // 漏打空格但字母正確 → 寬容處理
+    ok = true;
+  }
+
+  if (ok) {
+    state.correct += 1;
+    state.combo += 1;
+    state.maxCombo = Math.max(state.maxCombo, state.combo);
+    state.keyTimes.push(performance.now());
+    SFX.tick(state.combo);
+    if (state.combo > 0 && state.combo % 25 === 0) {
+      popStat(els.statCombo);
+      comboFloat(`×${state.combo} COMBO`);
+      SFX.comboUp();
+    }
+    if (state.pos >= w.length) {
+      wordBurst();
+      arrive();
+    } else {
+      renderWord();
+      caretSpark();
+    }
+  } else {
+    state.errors += 1;
+    state.combo = 0;
+    flashError();
+    SFX.error();
+  }
+  updateStats();
+}
+
+function popStat(el) {
+  const stat = el.closest(".stat");
+  stat.classList.remove("pop");
+  void stat.offsetWidth;
+  stat.classList.add("pop");
+}
+
+function flashError() {
+  els.typingPanel.classList.remove("shake");
+  els.word.classList.remove("err-flash");
+  void els.typingPanel.offsetWidth;
+  els.typingPanel.classList.add("shake");
+  els.word.classList.add("err-flash");
+  setTimeout(() => els.word.classList.remove("err-flash"), 240);
+}
+
+function arrive() {
+  state.idx += 1;
+  state.pos = 0;
+  updateMapHead(true);
+  if (state.mode === "battle") updateLeadChip();
+  if (state.idx >= state.line.stations.length - 1) {
+    finish(true);
+  } else {
+    SFX.chime();
+    renderWord();
+  }
+}
+
+/* ─── 結算 ──────────────────────────────────────────── */
+function finish(playerWon) {
+  state.finished = true;
+  state.playing = false;
+  const elapsed = state.startTime ? (performance.now() - state.startTime) / 1000 : 0;
+  const mins = elapsed / 60;
+  const kpm = mins > 0 ? Math.round(state.correct / mins) : 0;
+  const total = state.correct + state.errors;
+  const acc = total ? Math.round((state.correct / total) * 100) : 100;
+  const score = Math.max(0, state.correct * 10 + state.maxCombo * 5 - state.errors * 3);
+
+  if (state.mode === "battle") playerWon ? SFX.win() : SFX.lose();
+  else SFX.terminal();
+
+  const h2 = $("resultStation");
+  h2.classList.remove("lose");
+
+  if (state.mode === "battle") {
+    $("resultEyebrow").textContent = "對戰結果 RESULT";
+    h2.textContent = playerWon ? "勝利！" : "敗北⋯";
+    h2.classList.toggle("lose", !playerWon);
+    $("resultLine").textContent = playerWon
+      ? `你在${state.line.zh}甩開了 ${state.rivalDef.name}（${state.rivalDef.kpm} KPM）`
+      : `被 ${state.rivalDef.name} 搶先抵達${station(state.line.stations.length - 1).zh}`;
+  } else {
+    $("resultEyebrow").textContent = "終點站 TERMINAL";
+    h2.textContent = station(state.idx).zh;
+    $("resultLine").textContent = `${state.line.zh}全線 ${state.line.stations.length} 站完乘`;
+  }
+
+  $("rTime").textContent = !state.startTime ? "—"
+    : elapsed >= 60
+      ? `${Math.floor(elapsed / 60)}:${String(Math.round(elapsed % 60)).padStart(2, "0")}`
+      : `${elapsed.toFixed(1)}s`;
+  $("rKpm").textContent = kpm;
+  $("rAcc").textContent = acc + "%";
+  $("rCombo").textContent = state.maxCombo;
+  $("rScore").textContent = score;
+
+  let isBest = false;
+  if (state.mode === "solo") {
+    const prevBest = JSON.parse(localStorage.getItem(bestKey(state.line.id)) || "null");
+    isBest = !prevBest || score > prevBest.score;
+    if (isBest) localStorage.setItem(bestKey(state.line.id), JSON.stringify({ score, kpm, acc }));
+  }
+  $("rBest").classList.toggle("hidden", !isBest);
+
+  setTimeout(() => els.overlay.classList.remove("hidden"), 650);
+}
+
+/* ─── 主迴圈：速度引擎 + 對手 + 儀表 + 鏡頭 ─────────── */
+let lastT = performance.now();
+
+function tick(now) {
+  const dt = Math.min(now - lastT, 100);
+  lastT = now;
+  frame++;
+
+  // 玩家速度：近兩秒擊鍵頻率 → playbackRate
+  if (state.playing || state.finished) {
+    state.keyTimes = state.keyTimes.filter((t) => now - t < 2000);
+    const cps = state.keyTimes.length / 2;
+    const target = state.playing && state.startTime ? 0.18 + Math.min(cps / 6, 1) * (MAX_SPEED - 0.2) : 0;
+    speed += (target - speed) * 0.06;
+  } else {
+    speed += (0 - speed) * 0.05;
+  }
+  layerAnims.forEach((a) => (a.playbackRate = speed));
+  els.speedlines.style.opacity = Math.max(0, ((speed - 1.7) / 1.3) * 0.6).toFixed(3);
+
+  // 對手推進
+  if (state.mode === "battle" && state.playing && !state.finished) {
+    const jitter = 0.82 + 0.36 * (0.5 + 0.5 * Math.sin(now / 2300 + 1.3));
+    state.rival.chars += (state.rivalDef.kpm / 60) * (dt / 1000) * jitter;
+    while (state.rival.idx < state.cum.length - 1 && state.rival.chars >= state.cum[state.rival.idx + 1]) {
+      state.rival.idx += 1;
+    }
+    if (state.rival.chars >= state.totalChars) {
+      state.rival.chars = state.totalChars;
+      updateLeadChip();
+      finish(false);
+    }
+    // 對手列車相對位置（領先在前、落後在後）
+    // 差距超過 30 字（約三站）就加速駛出畫面外，直到再次接近才會回來
+    const delta = state.rival.chars - playerChars();
+    let targetX;
+    if (delta > 30) targetX = innerWidth * 1.2;
+    else if (delta < -30) targetX = -innerWidth * 0.9;
+    else targetX = delta * 9;
+    rivalX += (targetX - rivalX) * 0.04;
+    els.rivalTrain.style.transform = `translate3d(${rivalX.toFixed(1)}px,0,0)`;
+    if (frame % 10 === 0) updateLeadChip();
+  }
+
+  // 地理路線圖：列車沿真實路徑滑動
+  if (state.line) {
+    mapU += (playerUnits() - mapU) * 0.12;
+    if (state.mode === "battle") mapRivalU += (rivalUnits() - mapRivalU) * 0.12;
+    if (mapMode === "leaflet" && lRefs.train) {
+      const p = latLngAt(mapU);
+      lRefs.train.setLatLng(p);
+      if (frame % 3 === 0) {
+        const done = state.line.stations.slice(0, Math.floor(mapU) + 1).map((s) => s.pos);
+        done.push(p);
+        lRefs.done.setLatLngs(done);
+      }
+      if (lRefs.rival) lRefs.rival.setLatLng(latLngAt(mapRivalU));
+    } else if (mapMode === "svg" && mapPts.length) {
+      positionMapMarkers();
+    }
+  }
+
+  // 儀表板 + 引擎聲
+  if (frame % 4 === 0) {
+    els.gaugeFill.style.strokeDashoffset = (GAUGE_LEN * (1 - Math.min(speed / MAX_SPEED, 1))).toFixed(1);
+    els.kmh.textContent = Math.round((speed / MAX_SPEED) * 130);
+    SFX.setSpeed(speed);
+  }
+
+  // 高速時：鏡頭微震 + 車身前傾
+  if (!reducedMotion) {
+    if (speed > 2.2) {
+      const amp = (speed - 2.2) * 2.4;
+      const t = now / 60;
+      els.sceneShake.style.transform = `translate3d(${(Math.sin(t * 1.7) * amp * 0.5).toFixed(2)}px, ${(Math.cos(t * 2.3) * amp).toFixed(2)}px, 0)`;
+    } else if (els.sceneShake.style.transform) {
+      els.sceneShake.style.transform = "";
+    }
+    if (frame % 6 === 0) {
+      els.train.style.setProperty("--lean", `${(-speed * 1.1).toFixed(2)}deg`);
+    }
+  }
+
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+
+/* ─── 輸入接線（桌機鍵盤 + 行動裝置隱形輸入框 + IME 提醒）─ */
+function focusGhost() {
+  els.ghost.value = "";
+  els.ghost.focus({ preventScroll: true });
+}
+
+els.ghost.addEventListener("input", (e) => {
+  if (e.isComposing) return;
+  const data = e.data || els.ghost.value;
+  els.ghost.value = "";
+  if (data) [...data].forEach(handleChar);
+});
+
+els.ghost.addEventListener("compositionstart", () => {
+  els.imeWarn.classList.remove("hidden");
+  els.ghost.blur();
+  setTimeout(() => {
+    els.imeWarn.classList.add("hidden");
+    focusGhost();
+  }, 2200);
+});
+
+document.addEventListener("keydown", (e) => {
+  if (els.game.classList.contains("hidden")) return;
+  SFX.unlock(); // 瀏覽器需在使用者手勢後才允許發聲
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === " ") e.preventDefault(); // 避免頁面捲動
+  if (document.activeElement !== els.ghost) {
+    focusGhost();
+    handleChar(e.key);
+  }
+});
+
+document.addEventListener("click", () => {
+  SFX.unlock();
+  if (!els.game.classList.contains("hidden") && state.playing) focusGhost();
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) state.keyTimes = [];
+});
+
+let resizeTimer;
+addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    if (!els.game.classList.contains("hidden")) {
+      buildScene();
+      if (mapMode === "leaflet" && lMap) lMap.invalidateSize();
+      else buildMap();
+    } else {
+      renderPickerBg();
+    }
+  }, 250);
+});
+
+/* ─── 導覽按鈕 ──────────────────────────────────────── */
+function backToPicker() {
+  state.playing = false;
+  state.finished = true;
+  state.countdownTimers.forEach(clearTimeout);
+  els.countdown.classList.add("hidden");
+  els.game.classList.add("hidden");
+  els.overlay.classList.add("hidden");
+  els.picker.classList.remove("hidden");
+  renderPicker(); // 更新最佳成績
+}
+
+els.backBtn.addEventListener("click", backToPicker);
+els.pickBtn.addEventListener("click", backToPicker);
+els.retryBtn.addEventListener("click", () => startGame(state.line));
+
+els.muteBtn.classList.toggle("muted", SFX.muted);
+els.muteBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  els.muteBtn.classList.toggle("muted", SFX.toggle());
+});
+
+renderPicker();
+renderRivals();
+renderPickerBg();
+setMode("solo");

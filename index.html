@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>站名英打｜台北捷運 × 台灣鐵路</title>
+<meta name="description" content="打站名英文拼音，列車隨你的手速加速前進。收錄台北捷運六線與台鐵東西幹線，可與 AI 對手列車對戰。" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div id="app">
+
+  <!-- 路線選擇 -->
+  <section id="picker" class="screen">
+    <div class="picker-bg" id="pickerBg" aria-hidden="true"></div>
+    <header class="hero">
+      <div class="hero-mark" aria-hidden="true">
+        <span class="mark-dot" style="--c:#0070BD"></span><span class="mark-dot" style="--c:#E3002C"></span><span class="mark-dot" style="--c:#008659"></span><span class="mark-dot" style="--c:#F8B61C"></span><span class="mark-dot" style="--c:#C48C31"></span><span class="mark-dot" style="--c:#FEDB00"></span>
+      </div>
+      <h1>站名英打</h1>
+      <p class="tagline">打得越快，列車開得越快。</p>
+      <p class="sub">TAIPEI METRO × TAIWAN RAILWAY</p>
+    </header>
+
+    <div class="mode-row">
+      <div class="mode-toggle" role="tablist">
+        <button class="mode-btn active" id="modeSolo" type="button">單人挑戰</button>
+        <button class="mode-btn" id="modeBattle" type="button">對戰模式</button>
+      </div>
+      <div class="rival-row hidden" id="rivalRow"></div>
+    </div>
+
+    <div class="line-grid" id="lineGrid"></div>
+    <p class="foot-hint">用鍵盤輸入站名英文拼音・請切換成英文輸入法</p>
+  </section>
+
+  <!-- 遊戲 -->
+  <section id="game" class="screen hidden">
+    <div class="scene" id="scene" aria-hidden="true">
+      <div class="sky"></div>
+      <div class="moon"></div>
+      <div class="scene-shake" id="sceneShake">
+        <div class="layer" id="layerFar"></div>
+        <div class="layer" id="layerNear"></div>
+        <div class="layer" id="layerRail"></div>
+        <div class="train rival hidden" id="rivalTrain"></div>
+        <div class="train" id="train"></div>
+      </div>
+      <div class="speedlines" id="speedlines"></div>
+      <div class="sweep" id="sweep"></div>
+      <div class="vignette"></div>
+    </div>
+
+    <div class="hud">
+      <button id="backBtn" class="ghost-btn" type="button">← 路線</button>
+      <button id="muteBtn" class="ghost-btn icon-btn" type="button" aria-label="切換音效">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 9v6h4l5 4V5L7 9H3z" fill="currentColor"/>
+          <path class="snd-wave" d="M16 8.6a4.8 4.8 0 0 1 0 6.8" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round"/>
+          <path class="snd-wave" d="M18.6 6a8.6 8.6 0 0 1 0 12" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round"/>
+          <g class="snd-off" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <line x1="16" y1="9.5" x2="21" y2="14.5"/><line x1="21" y1="9.5" x2="16" y2="14.5"/>
+          </g>
+        </svg>
+      </button>
+      <div class="line-chip glass" id="lineChip"></div>
+      <div class="lead-chip glass hidden" id="leadChip"></div>
+      <div class="hud-right glass">
+        <div class="gauge">
+          <svg viewBox="0 0 64 40">
+            <path class="gauge-track" d="M6 36 A28 28 0 0 1 58 36" />
+            <path class="gauge-fill" id="gaugeFill" d="M6 36 A28 28 0 0 1 58 36" />
+          </svg>
+          <div class="gauge-num"><span id="kmh">0</span><label>km/h</label></div>
+        </div>
+        <div class="stat"><span id="statKpm">0</span><label>KPM</label></div>
+        <div class="stat"><span id="statAcc">100%</span><label>正確率</label></div>
+        <div class="stat"><span id="statCombo">0</span><label>連擊</label></div>
+      </div>
+    </div>
+
+    <div class="map-panel glass" id="mapPanel">
+      <div class="map-head" id="mapHead">
+        <span class="map-roundel" id="mapRoundel"></span>
+        <span class="map-now" id="mapNow"></span>
+        <span class="map-dir" id="mapDir"></span>
+      </div>
+      <div class="map-view" id="mapView"></div>
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="bottom-ui">
+      <div class="typing glass" id="typingPanel">
+        <div class="next-label">下一站 <b id="nextZh"></b><span class="next-en" id="nextEn"></span></div>
+        <div class="word" id="word"></div>
+        <div class="type-hint" id="typeHint">直接開始打字，空格可省略</div>
+        <div class="fx-layer" id="fxLayer"></div>
+      </div>
+    </div>
+
+    <div class="countdown hidden" id="countdown"></div>
+    <div class="ime-warn hidden" id="imeWarn">偵測到中文輸入法 — 請切換成英數模式</div>
+  </section>
+
+  <!-- 結算 -->
+  <div id="overlay" class="overlay hidden">
+    <div class="result-card" id="resultCard">
+      <p class="result-eyebrow" id="resultEyebrow">終點站 TERMINAL</p>
+      <h2 id="resultStation"></h2>
+      <p class="result-line" id="resultLine"></p>
+      <div class="result-grid">
+        <div class="r-stat"><span id="rTime">—</span><label>用時</label></div>
+        <div class="r-stat"><span id="rKpm">—</span><label>KPM</label></div>
+        <div class="r-stat"><span id="rAcc">—</span><label>正確率</label></div>
+        <div class="r-stat"><span id="rCombo">—</span><label>最高連擊</label></div>
+      </div>
+      <div class="result-score"><label>SCORE</label><span id="rScore">0</span></div>
+      <p class="result-best hidden" id="rBest">新紀錄！</p>
+      <div class="result-actions">
+        <button id="retryBtn" class="primary-btn" type="button">再跑一次</button>
+        <button id="pickBtn" class="ghost-btn" type="button">換條路線</button>
+      </div>
+    </div>
+  </div>
+
+  <input id="ghostInput" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="打字輸入" />
+</div>
+<script src="data.js"></script>
+<script src="audio.js"></script>
+<script src="game.js"></script>
+</body>
+</html>

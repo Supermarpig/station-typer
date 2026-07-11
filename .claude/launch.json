@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "station-typer",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "4173", "-d", "/Users/cody/Code/station-typer"],
+      "port": 4173
+    }
+  ]
+}
