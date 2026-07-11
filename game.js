@@ -22,6 +22,7 @@ const els = {
   countdown: $("countdown"),
   backBtn: $("backBtn"), retryBtn: $("retryBtn"), pickBtn: $("pickBtn"),
   muteBtn: $("muteBtn"),
+  uploadRow: $("uploadRow"), nickInput: $("nickInput"), uploadBtn: $("uploadBtn"), board: $("board"),
 };
 
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -783,6 +784,58 @@ function arrive() {
   }
 }
 
+/* ─── 成績上傳與排行榜 ──────────────────────────────── */
+const NICK_KEY = "stationTyper.nick";
+let lastRun = null;
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+async function loadBoard(lineId) {
+  els.board.innerHTML = `<div class="board-hint">排行榜載入中…</div>`;
+  try {
+    const rows = await fetch(`/api/scores?line=${encodeURIComponent(lineId)}`).then((r) => r.json());
+    if (!Array.isArray(rows) || !rows.length) {
+      els.board.innerHTML = `<div class="board-hint">這條線還沒有紀錄，搶頭香！</div>`;
+      return;
+    }
+    els.board.innerHTML =
+      `<div class="board-title">路線排行榜 TOP ${rows.length}</div>` +
+      rows.map((r, i) =>
+        `<div class="board-row${i === 0 ? " top1" : ""}">
+          <b>${i + 1}</b><span class="b-name">${esc(r.name)}</span>
+          <span class="b-kpm">${r.kpm | 0} KPM</span><span class="b-score">${r.score | 0}</span>
+        </div>`
+      ).join("");
+  } catch {
+    els.board.innerHTML = `<div class="board-hint">排行榜載入失敗</div>`;
+  }
+}
+
+async function uploadScore() {
+  const name = els.nickInput.value.trim();
+  if (!name) { els.nickInput.focus(); return; }
+  if (!lastRun) return;
+  localStorage.setItem(NICK_KEY, name);
+  els.uploadBtn.disabled = true;
+  els.uploadBtn.textContent = "上傳中…";
+  try {
+    const res = await fetch("/api/scores", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name, ...lastRun }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || "upload failed");
+    els.uploadBtn.textContent = `已上傳 ✓ 第 ${data.rank} 名`;
+    loadBoard(lastRun.lineId);
+  } catch {
+    els.uploadBtn.disabled = false;
+    els.uploadBtn.textContent = "失敗，再試一次";
+  }
+}
+
 /* ─── 結算 ──────────────────────────────────────────── */
 function finish(playerWon) {
   state.finished = true;
@@ -793,6 +846,22 @@ function finish(playerWon) {
   const total = state.correct + state.errors;
   const acc = total ? Math.round((state.correct / total) * 100) : 100;
   const score = Math.max(0, state.correct * 10 + state.maxCombo * 5 - state.errors * 3);
+
+  // 本場原始數據（上傳用；分數由伺服器重算）。對戰落敗未完賽，不開放上傳
+  lastRun = {
+    lineId: state.line.id,
+    mode: state.mode,
+    correct: state.correct,
+    errors: state.errors,
+    maxCombo: state.maxCombo,
+    timeMs: Math.round(elapsed * 1000),
+  };
+  const canUpload = !!state.startTime && (state.mode === "solo" || playerWon);
+  els.uploadRow.classList.toggle("hidden", !canUpload);
+  els.uploadBtn.disabled = false;
+  els.uploadBtn.textContent = "上傳成績";
+  els.nickInput.value = localStorage.getItem(NICK_KEY) || "";
+  loadBoard(state.line.id);
 
   if (state.mode === "battle") playerWon ? SFX.win() : SFX.lose();
   else SFX.terminal();
@@ -944,6 +1013,7 @@ els.ghost.addEventListener("compositionstart", () => {
 
 document.addEventListener("keydown", (e) => {
   if (els.game.classList.contains("hidden")) return;
+  if (!els.overlay.classList.contains("hidden")) return; // 結算畫面輸入暱稱時不搶焦點
   SFX.unlock(); // 瀏覽器需在使用者手勢後才允許發聲
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === " ") e.preventDefault(); // 避免頁面捲動
@@ -993,6 +1063,10 @@ function backToPicker() {
 els.backBtn.addEventListener("click", backToPicker);
 els.pickBtn.addEventListener("click", backToPicker);
 els.retryBtn.addEventListener("click", () => startGame(state.line));
+els.uploadBtn.addEventListener("click", uploadScore);
+els.nickInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") uploadScore();
+});
 
 els.muteBtn.classList.toggle("muted", SFX.muted);
 els.muteBtn.addEventListener("click", (e) => {

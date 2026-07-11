@@ -795,6 +795,48 @@ button:focus-visible, .line-card:focus-visible {
 
 .result-best { margin-top: 10px; font-size: 13px; font-weight: 700; color: var(--line); }
 
+/* 成績上傳與排行榜 */
+.upload-row { margin-top: 16px; display: flex; gap: 8px; justify-content: center; }
+.upload-row input {
+  flex: 1;
+  min-width: 0;
+  max-width: 190px;
+  background: #0b0f1a;
+  border: 1px solid var(--bg-edge);
+  color: var(--ink);
+  border-radius: var(--radius-s);
+  padding: 9px 12px;
+  font-size: 14px;
+  font-family: inherit;
+}
+.upload-row input:focus { outline: none; border-color: var(--line); }
+.upload-row input::placeholder { color: var(--ink-dim); }
+
+.board { margin-top: 14px; }
+.board-title, .board-hint {
+  text-align: center;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: var(--ink-dim);
+  margin-bottom: 6px;
+}
+.board-hint { margin: 10px 0 4px; }
+.board-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  text-align: left;
+}
+.board-row:nth-child(even) { background: #ffffff08; }
+.board-row b { width: 18px; flex: none; text-align: right; font-family: var(--font-mono); color: var(--ink-mute); }
+.board-row.top1 b { color: var(--line); }
+.b-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.b-kpm { flex: none; font-size: 11px; color: var(--ink-dim); }
+.b-score { flex: none; font-family: var(--font-mono); font-weight: 700; }
+
 .result-actions { margin-top: 22px; display: flex; gap: 10px; justify-content: center; }
 .primary-btn {
   background: var(--line);

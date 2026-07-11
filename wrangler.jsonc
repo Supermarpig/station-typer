@@ -3,7 +3,15 @@
   "name": "station-typer",
   "account_id": "a48fa87240a285385ba1b0279f9744ad",
   "compatibility_date": "2026-07-01",
+  "main": "worker.js", // 成績上傳 API；靜態資產優先，對不到的路徑才進 worker
   "assets": { "directory": "./" },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "station-typer",
+      "database_id": "18287796-3856-409a-882f-0f5b9feb6b40"
+    }
+  ],
   // 與儀表板現況一致：保留 workers.dev 網址與預覽網址
   "workers_dev": true,
   "preview_urls": true,

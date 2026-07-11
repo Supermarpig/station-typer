@@ -3,5 +3,7 @@
 .wrangler
 .assetsignore
 wrangler.jsonc
+worker.js
+schema.sql
 README.md
 CLAUDE.md
