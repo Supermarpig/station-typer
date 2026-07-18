@@ -12,6 +12,11 @@
       "database_id": "18287796-3856-409a-882f-0f5b9feb6b40"
     }
   ],
+  // 好友對戰房間：一房一 DO（SQLite-backed，免費方案可用）
+  "durable_objects": {
+    "bindings": [{ "name": "ROOM", "class_name": "Room" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }],
   // 與儀表板現況一致：保留 workers.dev 網址與預覽網址
   "workers_dev": true,
   "preview_urls": true,

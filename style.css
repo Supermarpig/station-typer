@@ -10,6 +10,7 @@
   --board-ink: #14181f;
   --board-ink-mute: #6b7482;
   --err: #ff5d5d;
+  --rival: #ff475f;      /* 對手色：對手列車、名牌、落後徽章、再戰提示 */
   --line: #0070bd;       /* 當前路線色，JS 動態設定 */
   --line-ink: #ffffff;   /* 線色帶上的文字色 */
   --glow: color-mix(in srgb, var(--line) 60%, transparent);
@@ -394,7 +395,7 @@ button:focus-visible, .line-card:focus-visible {
   position: absolute;
   left: 50%; top: -26px;
   transform: translateX(-50%);
-  background: #ff475fd9;
+  background: color-mix(in srgb, var(--rival) 85%, transparent);
   color: #fff;
   font-size: 11px;
   font-weight: 800;
@@ -402,7 +403,7 @@ button:focus-visible, .line-card:focus-visible {
   padding: 3px 10px;
   border-radius: 99px;
   white-space: nowrap;
-  box-shadow: 0 0 14px #ff475f66;
+  box-shadow: 0 0 14px color-mix(in srgb, var(--rival) 40%, transparent);
 }
 
 .speedlines {
@@ -485,7 +486,11 @@ button:focus-visible, .line-card:focus-visible {
   border-color: var(--glow);
   box-shadow: 0 0 16px var(--glow-soft);
 }
-.lead-chip.behind { color: #ff8091; border-color: #ff475f66; box-shadow: 0 0 16px #ff475f2e; }
+.lead-chip.behind {
+  color: color-mix(in srgb, var(--rival) 65%, #ffffff);
+  border-color: color-mix(in srgb, var(--rival) 40%, transparent);
+  box-shadow: 0 0 16px color-mix(in srgb, var(--rival) 18%, transparent);
+}
 
 .hud-right {
   margin-left: auto;
@@ -618,7 +623,7 @@ button:focus-visible, .line-card:focus-visible {
   border: 2px solid #fff;
   box-shadow: 0 0 12px var(--c);
 }
-.m-train-icon.rival .chip { width: 16px; height: 11px; box-shadow: 0 0 10px #ff475f; }
+.m-train-icon.rival .chip { width: 16px; height: 11px; box-shadow: 0 0 10px var(--rival); }
 
 .m-line {
   fill: none;
@@ -657,7 +662,7 @@ button:focus-visible, .line-card:focus-visible {
 .m-name.off { display: none; }
 
 .m-train { filter: drop-shadow(0 0 8px var(--glow)); }
-.m-train.rival { filter: drop-shadow(0 0 6px #ff475f8c); }
+.m-train.rival { filter: drop-shadow(0 0 6px color-mix(in srgb, var(--rival) 55%, transparent)); }
 
 .spacer { flex: 1; min-height: clamp(120px, 22vh, 300px); }
 
@@ -748,7 +753,7 @@ button:focus-visible, .line-card:focus-visible {
   100% { opacity: 0; transform: translate(-50%, -42px) scale(1); }
 }
 
-.ime-warn {
+.ime-warn, .pk-toast {
   position: fixed;
   left: 50%; bottom: 26px;
   transform: translateX(-50%);
@@ -761,7 +766,9 @@ button:focus-visible, .line-card:focus-visible {
   box-shadow: 0 8px 24px #00000073;
   animation: boardArrive var(--dur-med) var(--ease-out);
   z-index: 20;
+  white-space: nowrap;
 }
+.pk-toast.info { background: var(--bg-raise); border: 1px solid var(--bg-edge); color: var(--ink); }
 
 /* ─── 倒數 ───────────────────────────────────────────── */
 .countdown {
@@ -852,12 +859,8 @@ button:focus-visible, .line-card:focus-visible {
 
 .result-best { margin-top: 10px; font-size: 13px; font-weight: 700; color: var(--line); }
 
-/* 成績上傳與排行榜 */
-.upload-row { margin-top: 16px; display: flex; gap: 8px; justify-content: center; }
-.upload-row input {
-  flex: 1;
-  min-width: 0;
-  max-width: 190px;
+/* 文字輸入框（成績暱稱、對戰暱稱、車次號共用） */
+.ti {
   background: #0b0f1a;
   border: 1px solid var(--bg-edge);
   color: var(--ink);
@@ -865,9 +868,14 @@ button:focus-visible, .line-card:focus-visible {
   padding: 9px 12px;
   font-size: 14px;
   font-family: inherit;
+  min-width: 0;
 }
-.upload-row input:focus { outline: none; border-color: var(--line); }
-.upload-row input::placeholder { color: var(--ink-dim); }
+.ti:focus { outline: none; border-color: var(--line); }
+.ti::placeholder { color: var(--ink-dim); }
+
+/* 成績上傳與排行榜 */
+.upload-row { margin-top: 16px; display: flex; gap: 8px; justify-content: center; }
+.upload-row .ti { flex: 1; max-width: 190px; }
 
 .board { margin-top: 14px; }
 .board-title, .board-hint {
@@ -907,6 +915,151 @@ button:focus-visible, .line-card:focus-visible {
 }
 .primary-btn:hover { transform: translateY(-1px); filter: brightness(1.12); }
 .primary-btn:active { transform: translateY(0); }
+
+/* ─── 好友對戰（車次房間）───────────────────────────── */
+/* 選線畫面：好友對戰設定列 */
+.pk-setup { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.pk-setup .ti { width: 190px; text-align: center; }
+.pk-hint { font-size: 12px; color: var(--ink-dim); }
+.pk-hint b { color: var(--ink-mute); }
+.join-by-code {
+  font-size: 12px;
+  color: var(--ink-dim);
+  background: none;
+  border: none;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  transition: color var(--dur-fast);
+}
+.join-by-code:hover { color: var(--ink); }
+.pk-code-row { display: flex; gap: 8px; }
+.pk-code-row .ti { width: 120px; text-align: center; font-family: var(--font-mono); }
+
+/* 等待呼吸提示（等待上車…／等待發車…／對手想再戰！） */
+@keyframes waitPulse { 50% { opacity: 0.35; } }
+
+/* 月台等待室 / 乘車邀請卡（疊在 result-card 之上） */
+.pk-card .train-no {
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: clamp(44px, 9vw, 58px);
+  font-weight: 800;
+  font-style: italic;
+  letter-spacing: 0.06em;
+  line-height: 1.15;
+  text-shadow: 0 0 44px var(--glow), 0 0 12px var(--glow);
+  font-variant-numeric: tabular-nums;
+}
+.pk-card .train-no small {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  color: var(--ink-dim);
+}
+.pk-card.expired { border-top-color: var(--ink-dim); box-shadow: 0 30px 80px #000000b3; }
+.pk-card.expired .train-no { color: var(--ink-dim); text-shadow: none; }
+
+.card-lineinfo {
+  margin-top: 6px;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  font-size: 13px;
+  color: var(--ink-mute);
+}
+.pk-card .roundel { width: 26px; height: 26px; font-size: 10px; }
+.pk-card .roundel.tra { font-size: 9px; }
+.pk-invite-line { margin-top: 16px; font-size: 13px; color: var(--ink-mute); }
+.pk-invite-line b { color: var(--ink); }
+
+/* 月台雙軌：車粒沿用路線圖列車圖標語彙 */
+.platform { margin-top: 22px; display: grid; gap: 14px; }
+.track {
+  position: relative;
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px;
+  background: #0b0f1a;
+  border: 1px solid var(--bg-edge);
+  border-radius: var(--radius-m);
+  text-align: left;
+}
+.track::before { /* 軌道虛線 */
+  content: "";
+  position: absolute;
+  left: 14px; right: 14px; bottom: 9px;
+  height: 2px;
+  background: repeating-linear-gradient(90deg, #ffffff1f 0 14px, transparent 14px 22px);
+  border-radius: 2px;
+}
+.train-chip {
+  flex: none;
+  width: 34px; height: 22px;
+  border-radius: 7px;
+  background: var(--line);
+  border: 2px solid #fff;
+  box-shadow: 0 0 14px var(--glow);
+}
+.track.rival .train-chip {
+  background: var(--rival);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--rival) 60%, transparent);
+}
+.track.empty .train-chip {
+  background: none;
+  border: 2px dashed var(--ink-dim);
+  box-shadow: none;
+}
+.track-body { flex: 1; min-width: 0; }
+.track-name {
+  display: block;
+  font-size: 15px; font-weight: 700;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.track-name .role {
+  margin-left: 6px;
+  font-size: 10px; font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--line);
+  border: 1px solid var(--glow);
+  border-radius: 99px;
+  padding: 1px 7px;
+  vertical-align: 2px;
+}
+.track.rival .track-name .role {
+  color: var(--rival);
+  border-color: color-mix(in srgb, var(--rival) 45%, transparent);
+}
+.track-status { display: block; font-size: 11.5px; color: var(--ink-dim); }
+.track-status.aboard { color: color-mix(in srgb, var(--line) 70%, #ffffff); font-weight: 700; }
+.track.rival .track-status.aboard { color: color-mix(in srgb, var(--rival) 75%, #ffffff); }
+.track.empty .track-status { animation: waitPulse 1.6s ease-in-out infinite; }
+.track.arrive { animation: boardArrive var(--dur-slow) var(--ease-out); }
+
+/* 邀請連結列 */
+.invite-row { margin-top: 18px; display: flex; gap: 8px; }
+.invite-row .ti { flex: 1; font-family: var(--font-mono); font-size: 12px; color: var(--ink-mute); }
+.ghost-btn.copied { color: color-mix(in srgb, var(--line) 75%, #ffffff); border-color: var(--glow); }
+
+.pk-card .primary-btn { width: 100%; margin-top: 18px; }
+.pk-card .ghost-btn.wide { width: 100%; margin-top: 10px; padding: 10px 12px; }
+.pk-card .ti.wide { width: 100%; margin-top: 16px; text-align: center; }
+.primary-btn:disabled { opacity: 0.42; cursor: not-allowed; box-shadow: none; transform: none; }
+
+.guest-wait {
+  margin-top: 18px;
+  font-size: 13px; font-weight: 700;
+  color: var(--ink-mute);
+  animation: waitPulse 1.6s ease-in-out infinite;
+}
+.card-foot { margin-top: 12px; font-size: 11px; color: var(--ink-dim); }
+
+/* 結算卡：再戰提示 */
+.rematch-note {
+  margin-top: 14px;
+  font-size: 12px; font-weight: 700;
+  color: color-mix(in srgb, var(--rival) 75%, #ffffff);
+  animation: waitPulse 1.6s ease-in-out infinite;
+}
 
 /* 隱形輸入框：接收鍵盤（含行動裝置） */
 #ghostInput {

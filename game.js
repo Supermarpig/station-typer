@@ -1,14 +1,19 @@
 /* 站名英打 — 遊戲邏輯
    核心手法：視差圖層用 Web Animations API 無限循環位移，
    打字節奏換算成 playbackRate → 列車絲滑加減速（全程只動 transform/opacity）。
-   對戰模式：AI 對手以固定 KPM（含隨機起伏）推進，同場景賽跑。 */
+   電腦對戰：AI 對手以固定 KPM（含隨機起伏）推進，同場景賽跑。
+   好友對戰：一房一車次（WebSocket），對手進度由網路回報，勝負由伺服器判定；
+   呈現層完全沿用電腦對戰，只換對手進度的資料來源。 */
 
 const $ = (id) => document.getElementById(id);
 
 const els = {
   picker: $("picker"), game: $("game"), overlay: $("overlay"),
   pickerBg: $("pickerBg"), lineGrid: $("lineGrid"), lineChip: $("lineChip"),
-  modeSolo: $("modeSolo"), modeBattle: $("modeBattle"), rivalRow: $("rivalRow"),
+  modeSolo: $("modeSolo"), modeBattle: $("modeBattle"), modePk: $("modePk"), rivalRow: $("rivalRow"),
+  pkSetup: $("pkSetup"), pkNick: $("pkNick"), pkJoinToggle: $("pkJoinToggle"),
+  pkCodeRow: $("pkCodeRow"), pkCodeInput: $("pkCodeInput"), pkCodeGo: $("pkCodeGo"),
+  pkOverlay: $("pkOverlay"), pkCard: $("pkCard"), pkToast: $("pkToast"), rematchNote: $("rematchNote"),
   mapHead: $("mapHead"), mapRoundel: $("mapRoundel"), mapNow: $("mapNow"), mapDir: $("mapDir"),
   mapView: $("mapView"),
   scene: $("scene"), sceneShake: $("sceneShake"),
@@ -178,6 +183,7 @@ els.train.innerHTML = trainSVG();
 const state = {
   line: null,
   mode: "solo",
+  pk: false,       // 好友對戰場（mode 仍為 battle，對手進度來自網路）
   rivalDef: RIVALS[1],
   idx: 0,          // 目前所在站
   pos: 0,          // 目前單字打到第幾個字元
@@ -240,11 +246,17 @@ function setMode(mode) {
   pickerState.mode = mode;
   els.modeSolo.classList.toggle("active", mode === "solo");
   els.modeBattle.classList.toggle("active", mode === "battle");
+  els.modePk.classList.toggle("active", mode === "pk");
   els.rivalRow.classList.toggle("hidden", mode !== "battle");
+  els.pkSetup.classList.toggle("hidden", mode !== "pk");
+  if (mode === "pk" && !els.pkNick.value) {
+    els.pkNick.value = localStorage.getItem(NICK_KEY) || "";
+  }
 }
 
 els.modeSolo.addEventListener("click", () => setMode("solo"));
 els.modeBattle.addEventListener("click", () => setMode("battle"));
+els.modePk.addEventListener("click", () => setMode("pk"));
 
 function renderPicker() {
   els.lineGrid.innerHTML = "";
@@ -264,7 +276,10 @@ function renderPicker() {
         <span class="lc-meta">${first} ⇄ ${last}・${line.stations.length} 站${line.note ? "・" + line.note : ""}</span>
       </span>
       <span class="lc-best">${best ? `最佳<b>${best.score}</b>` : ""}</span>`;
-    card.addEventListener("click", () => startGame(line));
+    card.addEventListener("click", () => {
+      if (pickerState.mode === "pk") pkCreate(line); // 好友對戰：點路線卡＝開新車次
+      else startGame(line);
+    });
     els.lineGrid.appendChild(card);
   });
 }
@@ -309,10 +324,13 @@ async function loadHomeBoard() {
 }
 
 /* ─── 遊戲畫面 ──────────────────────────────────────── */
-function startGame(line) {
+function startGame(line, pkRace) {
   state.line = line;
-  state.mode = pickerState.mode;
-  state.rivalDef = RIVALS.find((r) => r.id === pickerState.rivalId) || RIVALS[1];
+  state.pk = !!pkRace; // 好友對戰：呈現層沿用 battle，對手進度來自網路
+  state.mode = state.pk ? "battle" : pickerState.mode;
+  state.rivalDef = state.pk
+    ? { id: "pk", name: pk.oppName || "對手", kpm: 0, color: "#ff475f" }
+    : RIVALS.find((r) => r.id === pickerState.rivalId) || RIVALS[1];
   state.idx = 0;
   state.pos = 0;
   state.correct = 0;
@@ -357,13 +375,28 @@ function startGame(line) {
     els.leadChip.classList.remove("behind");
   }
 
+  els.rematchNote.classList.add("hidden");
+  els.retryBtn.disabled = false;
+
   buildScene();
   buildMap();
   updateMapHead(false);
   renderWord();
   updateStats();
 
-  if (!reducedMotion) {
+  if (state.pk) {
+    // 與對手對齊伺服器起跑時刻（倒數序列從 3 到起跑共 PK_COUNTDOWN_LEAD ms）
+    const delay = Math.max(0, pk.playAt - Date.now() - PK_COUNTDOWN_LEAD);
+    if (!reducedMotion) {
+      state.countdownTimers.push(setTimeout(runCountdown, delay));
+    } else {
+      state.countdownTimers.push(setTimeout(() => {
+        state.playing = true;
+        state.startTime = performance.now();
+        focusGhost();
+      }, Math.max(0, pk.playAt - Date.now())));
+    }
+  } else if (!reducedMotion) {
     runCountdown(); // 單人與對戰都倒數 3-2-1-GO
   } else {
     state.playing = true;
@@ -457,7 +490,7 @@ function buildLeafletMap() {
   if (state.mode === "battle") {
     const rivalIcon = L.divIcon({
       className: "m-train-icon rival",
-      html: `<div class="chip" style="--c:#ff475f"></div>`,
+      html: `<div class="chip" style="--c:var(--rival)"></div>`,
       iconSize: [16, 11],
       iconAnchor: [8, 5.5],
     });
@@ -567,7 +600,7 @@ function buildMapSVG() {
       <g id="mDots">${dots}</g>
       <g id="mNames">${names}</g>
       <g id="mRival" class="m-train rival${state.mode === "battle" ? "" : " hidden"}">
-        <rect x="-7" y="-5.5" width="14" height="11" rx="3.5" fill="#ff475f" stroke="#fff" stroke-width="1.5"/>
+        <rect x="-7" y="-5.5" width="14" height="11" rx="3.5" fill="var(--rival)" stroke="#fff" stroke-width="1.5"/>
         <rect x="-4" y="-2.5" width="8" height="4" rx="1.5" fill="#0b0f1a"/>
       </g>
       <g id="mTrain" class="m-train">
@@ -787,6 +820,7 @@ function handleChar(ch) {
     state.combo += 1;
     state.maxCombo = Math.max(state.maxCombo, state.combo);
     state.keyTimes.push(performance.now());
+    pkSendProgress(false); // 好友對戰：節流回報進度
     SFX.tick(state.combo);
     if (state.combo > 0 && state.combo % 25 === 0) {
       popStat(els.statCombo);
@@ -828,10 +862,15 @@ function flashError() {
 function arrive() {
   state.idx += 1;
   state.pos = 0;
+  pkSendProgress(true); // 抵站即回報（含衝線的最終進度）
   updateMapHead(true);
   if (state.mode === "battle") updateLeadChip();
   if (state.idx >= state.line.stations.length) {
-    finish(true);
+    if (state.pk) {
+      state.playing = false; // 衝線：鎖輸入，等伺服器 end 訊息判定勝負
+    } else {
+      finish(true);
+    }
   } else {
     SFX.chime();
     renderWord();
@@ -890,6 +929,341 @@ async function uploadScore() {
   }
 }
 
+/* ─── 好友對戰（車次房間）───────────────────────────── */
+/* 詞彙：房間=車次、開房者=列車長、加入=上車、開始=發車。
+   流程：列車長點路線卡開車次 → 分享 ?room=1234 連結 → 隊友上車 → 發車 →
+   伺服器廣播 startAt，雙方對齊倒數 → 進度互報 → 伺服器判定勝負 → 可再戰。 */
+const PK_COUNTDOWN_LEAD = 2600; // runCountdown 從「3」到起跑的總時長（4 拍 × 700ms − 700 + 500）
+const PK_SEND_MS = 150;         // 進度回報節流間隔
+
+const pk = {
+  ws: null, role: null, code: null, hostKey: null,
+  line: null, myName: "", oppName: "",
+  state: "idle",      // idle | waiting | racing | done
+  oppChars: 0,        // 對手最後回報的累計字元數
+  playAt: 0,          // 本地時鐘的起跑時刻（由伺服器 startAt 校正時差而來）
+  lastSend: 0, sendTimer: 0,
+  closing: false,     // 自己主動離開，close 事件不當斷線處理
+  oppWants: false,    // 對手已按再戰
+  oppGone: false,     // 對手已離開，再戰無望
+  rematchSent: false,
+};
+
+function cleanNick(v) { return String(v ?? "").trim().replace(/[<>]/g, "").slice(0, 12); }
+
+function showPkToast(text, info) {
+  els.pkToast.textContent = text;
+  els.pkToast.classList.toggle("info", !!info);
+  els.pkToast.classList.remove("hidden");
+  clearTimeout(showPkToast.timer);
+  showPkToast.timer = setTimeout(() => els.pkToast.classList.add("hidden"), 2800);
+}
+
+function setLineTheme(line) {
+  document.documentElement.style.setProperty("--line", line.color);
+  document.documentElement.style.setProperty("--line-ink", line.darkText ? "#20242c" : "#ffffff");
+}
+
+/* 列車長：點路線卡 → 開新車次 */
+async function pkCreate(line) {
+  const name = cleanNick(els.pkNick.value);
+  if (!name) { els.pkNick.focus(); return; }
+  localStorage.setItem(NICK_KEY, name);
+  const totalChars = line.stations.reduce((n, s) => n + s.typing.length, 0);
+  try {
+    const res = await fetch("/api/room", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ lineId: line.id, name, totalChars }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error);
+    pk.role = "host";
+    pk.code = data.code;
+    pk.hostKey = data.hostKey;
+    pk.myName = name;
+    pk.line = line;
+    setLineTheme(line);
+    pkConnect();
+  } catch {
+    showPkToast("開車次失敗，請稍後再試");
+  }
+}
+
+/* 隊友：開邀請連結（或輸入車次號）→ 乘車邀請卡 */
+async function pkShowJoin(code) {
+  els.pkOverlay.classList.remove("hidden");
+  els.pkCard.classList.remove("expired");
+  els.pkCard.innerHTML = `<p class="result-eyebrow">乘車邀請 INVITE</p><p class="guest-wait">查詢車次中…</p>`;
+  try {
+    const res = await fetch(`/api/room/${code}`);
+    if (!res.ok) throw 0;
+    const info = await res.json();
+    const line = LINES.find((l) => l.id === info.lineId);
+    if (!line || info.state !== "waiting") throw 0;
+    if (info.full) {
+      renderPkExpired("這班車已滿員。<br />向隊友要一班新的車次吧。");
+      return;
+    }
+    renderPkJoin(code, info, line);
+  } catch {
+    renderPkExpired();
+  }
+}
+
+function lineRoundel(line) {
+  return `<span class="roundel ${line.operator === "tra" ? "tra" : ""}"
+    style="--lc:${line.color};--lc-ink:${line.darkText ? "#20242c" : "#fff"}">${line.badge}</span>`;
+}
+
+function renderPkJoin(code, info, line) {
+  setLineTheme(line);
+  const nick = localStorage.getItem(NICK_KEY) || "";
+  els.pkCard.innerHTML = `
+    <p class="result-eyebrow">乘車邀請 INVITE</p>
+    <div class="train-no"><small>車次 TRAIN</small>${code}</div>
+    <div class="card-lineinfo">${lineRoundel(line)}<span>${line.zh}・${line.stations.length} 站</span></div>
+    <p class="pk-invite-line"><b>${esc(info.hostName)}</b> 邀請你來一場站名英打對決</p>
+    <input class="ti wide" id="pkJoinNick" type="text" maxlength="12" placeholder="輸入暱稱"
+           autocomplete="off" value="${esc(nick)}" />
+    <button class="primary-btn" id="pkJoinGo" type="button">上車</button>
+    <p class="card-foot">需要英文鍵盤・約 3–5 分鐘一局</p>`;
+  const board = () => {
+    const nickV = cleanNick($("pkJoinNick").value);
+    if (!nickV) { $("pkJoinNick").focus(); return; }
+    localStorage.setItem(NICK_KEY, nickV);
+    pk.role = "guest";
+    pk.code = code;
+    pk.hostKey = null;
+    pk.myName = nickV;
+    pk.line = line;
+    pkConnect();
+  };
+  $("pkJoinGo").addEventListener("click", board);
+  $("pkJoinNick").addEventListener("keydown", (e) => { if (e.key === "Enter") board(); });
+}
+
+function renderPkExpired(html) {
+  els.pkOverlay.classList.remove("hidden");
+  els.pkCard.classList.add("expired");
+  els.pkCard.innerHTML = `
+    <p class="result-eyebrow">乘車邀請 INVITE</p>
+    <div class="train-no"><small>車次 TRAIN</small>－－－－</div>
+    <p class="pk-invite-line">${html || "查無此車次，可能已發車。<br />向隊友要一條新的邀請連結吧。"}</p>
+    <button class="primary-btn" id="pkErrHome" type="button">回首頁自己開一班</button>`;
+  $("pkErrHome").addEventListener("click", () => {
+    pkLeave();
+    setMode("pk");
+  });
+}
+
+function pkConnect() {
+  pk.closing = false;
+  pk.oppWants = pk.oppGone = false;
+  pk.rematchSent = false;
+  pk.oppChars = 0;
+  pk.state = "waiting";
+  els.pkOverlay.classList.remove("hidden");
+  els.pkCard.classList.remove("expired");
+  els.pkCard.innerHTML = `<p class="result-eyebrow">月台 PLATFORM</p><p class="guest-wait">連線中…</p>`;
+
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const q = new URLSearchParams({ name: pk.myName });
+  if (pk.hostKey) q.set("key", pk.hostKey);
+  const ws = new WebSocket(`${proto}://${location.host}/api/room/${pk.code}/ws?${q}`);
+  pk.ws = ws;
+  ws.addEventListener("message", (e) => {
+    let msg;
+    try { msg = JSON.parse(e.data); } catch { return; }
+    pkHandle(msg);
+  });
+  ws.addEventListener("close", () => { if (pk.ws === ws) pkClosed(); });
+  history.replaceState(null, "", location.pathname); // 清掉 ?room=，避免重整重複入房
+}
+
+function pkHandle(msg) {
+  if (msg.t === "room") {
+    pk.oppName = pk.role === "host" ? (msg.guest ? msg.guest.name : "") : msg.host.name;
+    if (pk.state === "waiting") renderPkRoom(msg);
+    return;
+  }
+  if (msg.t === "start") { // 發車（首戰或再戰都走這裡）
+    pk.playAt = msg.startAt - (msg.now - Date.now()); // 用伺服器時間差校正本地起跑時刻
+    pk.state = "racing";
+    pk.oppChars = 0;
+    pk.oppWants = false;
+    pk.rematchSent = false;
+    els.pkOverlay.classList.add("hidden");
+    els.overlay.classList.add("hidden");
+    startGame(pk.line, true);
+    return;
+  }
+  if (msg.t === "p") { pk.oppChars = msg.c; return; }
+  if (msg.t === "end") {
+    if (pk.state !== "racing") return;
+    pk.state = "done";
+    const won = msg.winner === pk.role;
+    if (msg.reason === "forfeit") {
+      pk.oppGone = true;
+      showPkToast("對手已下車 — 你獲勝！");
+    } else if (!won) {
+      pk.oppChars = state.totalChars; // 對手衝線，畫面同步到終點
+    }
+    if (!state.finished) finish(won);
+    return;
+  }
+  if (msg.t === "rematch") {
+    pk.oppWants = true;
+    els.rematchNote.classList.remove("hidden");
+    return;
+  }
+  if (msg.t === "gone") { // 結算後對手離開：再戰無望
+    pk.oppGone = true;
+    els.rematchNote.classList.add("hidden");
+    els.retryBtn.textContent = "對手已離開";
+    els.retryBtn.disabled = true;
+    return;
+  }
+  if (msg.t === "expired") {
+    pk.closing = true; // 伺服器隨後會關閉連線，不當斷線處理
+    if (pk.state === "waiting") {
+      renderPkExpired(pk.role === "guest"
+        ? "列車長已離開，車次取消。"
+        : "車次逾時未發車，已自動取消。");
+    }
+    pk.state = "idle";
+  }
+}
+
+function renderPkRoom(msg) {
+  const line = pk.line;
+  const isHost = pk.role === "host";
+  const guest = msg.guest;
+  const link = `${location.origin}/?room=${pk.code}`;
+  const first = line.stations[0].zh;
+  const last = line.stations[line.stations.length - 1].zh;
+
+  els.pkCard.innerHTML = `
+    <p class="result-eyebrow">月台 PLATFORM</p>
+    <div class="train-no"><small>車次 TRAIN</small>${pk.code}</div>
+    <div class="card-lineinfo">${lineRoundel(line)}<span>${line.zh}・${first} ⇄ ${last}・${line.stations.length} 站</span></div>
+    <div class="platform">
+      <div class="track">
+        <span class="train-chip"></span>
+        <span class="track-body">
+          <span class="track-name">${esc(msg.host.name)}${isHost ? "（你）" : ""} <span class="role">列車長</span></span>
+          <span class="track-status aboard">已上車</span>
+        </span>
+      </div>
+      <div class="track rival ${guest ? "arrive" : "empty"}">
+        <span class="train-chip"></span>
+        <span class="track-body">
+          <span class="track-name">${guest ? esc(guest.name) + (isHost ? "" : "（你）") : "虛位以待"}</span>
+          <span class="track-status ${guest ? "aboard" : ""}">${guest ? "已上車" : "等待上車…"}</span>
+        </span>
+      </div>
+    </div>
+    ${isHost ? `
+      <div class="invite-row">
+        <input class="ti" id="pkLink" type="text" readonly value="${esc(link)}" aria-label="邀請連結" />
+        <button class="ghost-btn" id="pkCopy" type="button">複製邀請連結</button>
+      </div>
+      <button class="primary-btn" id="pkDepart" type="button" ${guest ? "" : "disabled"}>
+        ${guest ? "發車" : "等待隊友上車…"}
+      </button>`
+    : `<p class="guest-wait">等待列車長發車…</p>`}
+    <button class="ghost-btn wide" id="pkLeaveBtn" type="button">${isHost ? "取消車次" : "下車離開"}</button>
+    <p class="card-foot">車次開出前 10 分鐘內有效，逾時自動取消</p>`;
+
+  const copyBtn = $("pkCopy");
+  if (copyBtn) {
+    copyBtn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(link);
+      } catch {
+        $("pkLink").select();
+        document.execCommand("copy");
+      }
+      copyBtn.textContent = "已複製！";
+      copyBtn.classList.add("copied");
+      setTimeout(() => {
+        copyBtn.textContent = "複製邀請連結";
+        copyBtn.classList.remove("copied");
+      }, 1500);
+    });
+  }
+  const departBtn = $("pkDepart");
+  if (departBtn) {
+    departBtn.addEventListener("click", () => {
+      if (pk.ws && pk.ws.readyState === 1) pk.ws.send(JSON.stringify({ t: "depart" }));
+    });
+  }
+  $("pkLeaveBtn").addEventListener("click", pkLeave);
+}
+
+/* 進度回報：累計值制（掉包不歪），節流 + 抵站強制送出 */
+function pkSendProgress(flush) {
+  if (!state.pk || pk.state !== "racing" || !pk.ws || pk.ws.readyState !== 1) return;
+  const send = () => {
+    pk.lastSend = performance.now();
+    pk.sendTimer = 0;
+    if (pk.ws && pk.ws.readyState === 1) {
+      pk.ws.send(JSON.stringify({ t: "p", c: playerChars() }));
+    }
+  };
+  const since = performance.now() - pk.lastSend;
+  if (flush || since >= PK_SEND_MS) {
+    clearTimeout(pk.sendTimer);
+    send();
+  } else if (!pk.sendTimer) {
+    pk.sendTimer = setTimeout(send, PK_SEND_MS - since);
+  }
+}
+
+function pkRematch() {
+  if (pk.oppGone || pk.rematchSent || !pk.ws || pk.ws.readyState !== 1) return;
+  pk.rematchSent = true;
+  pk.ws.send(JSON.stringify({ t: "rematch" }));
+  els.retryBtn.disabled = true;
+  els.retryBtn.textContent = "等待對手…";
+}
+
+function pkLeave() {
+  clearTimeout(pk.sendTimer);
+  pk.sendTimer = 0;
+  if (pk.ws) {
+    pk.closing = true;
+    try { pk.ws.close(1000); } catch {}
+  }
+  pk.ws = null;
+  pk.state = "idle";
+  pk.oppChars = 0;
+  els.pkOverlay.classList.add("hidden");
+}
+
+function pkClosed() {
+  const was = pk.state;
+  pk.ws = null;
+  if (pk.closing) return; // 自己離開或伺服器已宣告 expired
+  if (was === "racing" && !state.finished) {
+    pk.state = "idle";
+    showPkToast("連線中斷，對戰中止");
+    backToPicker();
+    return;
+  }
+  if (was === "waiting") {
+    pk.state = "idle";
+    renderPkExpired("連線中斷。<br />請回首頁重新開一班。");
+    return;
+  }
+  if (was === "done" && !pk.oppGone) { // 結算畫面掛著時斷線：鎖住再戰
+    pk.oppGone = true;
+    els.rematchNote.classList.add("hidden");
+    els.retryBtn.textContent = "連線已中斷";
+    els.retryBtn.disabled = true;
+  }
+}
+
 /* ─── 結算 ──────────────────────────────────────────── */
 function finish(playerWon) {
   state.finished = true;
@@ -910,7 +1284,8 @@ function finish(playerWon) {
     maxCombo: state.maxCombo,
     timeMs: Math.round(elapsed * 1000),
   };
-  const canUpload = !!state.startTime && (state.mode === "solo" || playerWon);
+  // 未達伺服器門檻（correct < 10）的場次不開放上傳（例如對手秒退的棄賽勝）
+  const canUpload = !!state.startTime && state.correct >= 10 && (state.mode === "solo" || playerWon);
   els.uploadRow.classList.toggle("hidden", !canUpload);
   els.uploadBtn.disabled = false;
   els.uploadBtn.textContent = "上傳成績";
@@ -927,8 +1302,9 @@ function finish(playerWon) {
     $("resultEyebrow").textContent = "對戰結果 RESULT";
     h2.textContent = playerWon ? "勝利！" : "敗北⋯";
     h2.classList.toggle("lose", !playerWon);
+    const kpmTag = state.pk ? "" : `（${state.rivalDef.kpm} KPM）`; // 真人對手不標 KPM
     $("resultLine").textContent = playerWon
-      ? `你在${state.line.zh}甩開了 ${state.rivalDef.name}（${state.rivalDef.kpm} KPM）`
+      ? `你在${state.line.zh}甩開了 ${state.rivalDef.name}${kpmTag}`
       : `被 ${state.rivalDef.name} 搶先抵達${station(state.line.stations.length - 1).zh}`;
   } else {
     $("resultEyebrow").textContent = "終點站 TERMINAL";
@@ -952,6 +1328,11 @@ function finish(playerWon) {
     if (isBest) localStorage.setItem(bestKey(state.line.id), JSON.stringify({ score, kpm, acc }));
   }
   $("rBest").classList.toggle("hidden", !isBest);
+
+  // 好友對戰：再跑一次 → 再戰一場（雙方都按才重新發車）
+  els.retryBtn.disabled = state.pk && pk.oppGone;
+  els.retryBtn.textContent = state.pk ? (pk.oppGone ? "對手已離開" : "再戰一場") : "再跑一次";
+  els.rematchNote.classList.toggle("hidden", !(state.pk && pk.oppWants));
 
   setTimeout(() => els.overlay.classList.remove("hidden"), 650);
 }
@@ -978,12 +1359,17 @@ function tick(now) {
 
   // 對手推進
   if (state.mode === "battle" && state.playing && !state.finished) {
-    const jitter = 0.82 + 0.36 * (0.5 + 0.5 * Math.sin(now / 2300 + 1.3));
-    state.rival.chars += (state.rivalDef.kpm / 60) * (dt / 1000) * jitter;
+    if (state.pk) {
+      // 真人對手：朝最後收到的累計進度平滑逼近；勝負由伺服器 end 訊息判定
+      state.rival.chars += (pk.oppChars - state.rival.chars) * Math.min(1, dt / 160);
+    } else {
+      const jitter = 0.82 + 0.36 * (0.5 + 0.5 * Math.sin(now / 2300 + 1.3));
+      state.rival.chars += (state.rivalDef.kpm / 60) * (dt / 1000) * jitter;
+    }
     while (state.rival.idx < state.cum.length - 1 && state.rival.chars >= state.cum[state.rival.idx + 1]) {
       state.rival.idx += 1;
     }
-    if (state.rival.chars >= state.totalChars) {
+    if (!state.pk && state.rival.chars >= state.totalChars) {
       state.rival.chars = state.totalChars;
       updateLeadChip();
       finish(false);
@@ -1104,6 +1490,7 @@ addEventListener("resize", () => {
 
 /* ─── 導覽按鈕 ──────────────────────────────────────── */
 function backToPicker() {
+  pkLeave(); // 好友對戰中離場＝下車（對戰中會被判棄賽）
   state.playing = false;
   state.finished = true;
   state.countdownTimers.forEach(clearTimeout);
@@ -1117,7 +1504,10 @@ function backToPicker() {
 
 els.backBtn.addEventListener("click", backToPicker);
 els.pickBtn.addEventListener("click", backToPicker);
-els.retryBtn.addEventListener("click", () => startGame(state.line));
+els.retryBtn.addEventListener("click", () => {
+  if (state.pk) pkRematch();
+  else startGame(state.line);
+});
 els.uploadBtn.addEventListener("click", uploadScore);
 els.nickInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") uploadScore();
@@ -1129,8 +1519,30 @@ els.muteBtn.addEventListener("click", (e) => {
   els.muteBtn.classList.toggle("muted", SFX.toggle());
 });
 
+/* 好友對戰：輸入車次號加入 */
+els.pkJoinToggle.addEventListener("click", () => {
+  els.pkCodeRow.classList.toggle("hidden");
+  if (!els.pkCodeRow.classList.contains("hidden")) els.pkCodeInput.focus();
+});
+function pkGoByCode() {
+  const code = els.pkCodeInput.value.trim();
+  if (!/^\d{4}$/.test(code)) { els.pkCodeInput.focus(); return; }
+  pkShowJoin(code);
+}
+els.pkCodeGo.addEventListener("click", pkGoByCode);
+els.pkCodeInput.addEventListener("keydown", (e) => { if (e.key === "Enter") pkGoByCode(); });
+
 renderPicker();
 renderRivals();
 renderPickerBg();
 initHomeBoard();
 setMode("solo");
+
+/* 邀請連結入口：?room=1234 直接開乘車邀請卡 */
+{
+  const roomCode = new URLSearchParams(location.search).get("room");
+  if (roomCode && /^\d{4}$/.test(roomCode)) {
+    setMode("pk");
+    pkShowJoin(roomCode);
+  }
+}

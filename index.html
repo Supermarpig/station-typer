@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>站名英打｜台北捷運 × 台灣鐵路</title>
-<meta name="description" content="打站名英文拼音，列車隨你的手速加速前進。收錄台北捷運六線與台鐵東西幹線，可與 AI 對手列車對戰。" />
+<meta name="description" content="打站名英文拼音，列車隨你的手速加速前進。收錄台北捷運六線與台鐵東西幹線，可與 AI 對手對戰，或開車次邀請好友 PK。" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <link rel="stylesheet" href="style.css" />
@@ -27,9 +27,19 @@
     <div class="mode-row">
       <div class="mode-toggle" role="tablist">
         <button class="mode-btn active" id="modeSolo" type="button">單人挑戰</button>
-        <button class="mode-btn" id="modeBattle" type="button">對戰模式</button>
+        <button class="mode-btn" id="modeBattle" type="button">電腦對戰</button>
+        <button class="mode-btn" id="modePk" type="button">好友對戰</button>
       </div>
       <div class="rival-row hidden" id="rivalRow"></div>
+      <div class="pk-setup hidden" id="pkSetup">
+        <input class="ti" id="pkNick" type="text" maxlength="12" placeholder="輸入暱稱" autocomplete="off" />
+        <p class="pk-hint">點下方任一路線，<b>開新車次</b>邀請隊友</p>
+        <button class="join-by-code" id="pkJoinToggle" type="button">收到車次號碼？輸入車次加入</button>
+        <div class="pk-code-row hidden" id="pkCodeRow">
+          <input class="ti" id="pkCodeInput" type="text" inputmode="numeric" maxlength="4" placeholder="4 位車次號" autocomplete="off" />
+          <button class="ghost-btn" id="pkCodeGo" type="button">前往</button>
+        </div>
+      </div>
     </div>
 
     <div class="line-grid" id="lineGrid"></div>
@@ -129,10 +139,11 @@
       <div class="result-score"><label>SCORE</label><span id="rScore">0</span></div>
       <p class="result-best hidden" id="rBest">新紀錄！</p>
       <div class="upload-row" id="uploadRow">
-        <input id="nickInput" type="text" maxlength="12" placeholder="輸入暱稱" autocomplete="off" />
+        <input id="nickInput" class="ti" type="text" maxlength="12" placeholder="輸入暱稱" autocomplete="off" />
         <button id="uploadBtn" class="ghost-btn" type="button">上傳成績</button>
       </div>
       <div class="board" id="board"></div>
+      <p class="rematch-note hidden" id="rematchNote">對手想再戰！</p>
       <div class="result-actions">
         <button id="retryBtn" class="primary-btn" type="button">再跑一次</button>
         <button id="pickBtn" class="ghost-btn" type="button">換條路線</button>
@@ -140,6 +151,12 @@
       <a class="site-link" href="https://www.bloodtw.com/?utm_source=station-typer&utm_medium=referral&utm_content=result" target="_blank" rel="noopener">🩸 休息一下，查查哪裡可以捐血</a>
     </div>
   </div>
+
+  <!-- 好友對戰：月台等待室 / 乘車邀請卡（內容由 JS 依狀態渲染） -->
+  <div id="pkOverlay" class="overlay hidden">
+    <div class="result-card pk-card" id="pkCard"></div>
+  </div>
+  <div class="pk-toast hidden" id="pkToast" role="status"></div>
 
   <input id="ghostInput" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="打字輸入" />
 </div>
