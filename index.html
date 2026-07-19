@@ -109,6 +109,8 @@
       <div class="map-head" id="mapHead">
         <span class="map-roundel" id="mapRoundel"></span>
         <span class="map-now" id="mapNow"></span>
+        <!-- 對戰限定：對手目前所在站（紅點呼應地圖上的對手列車） -->
+        <span class="map-rival hidden" id="mapRival"></span>
         <span class="map-dir" id="mapDir"></span>
       </div>
       <div class="map-view" id="mapView"></div>
@@ -129,6 +131,11 @@
       <div class="wait-panel glass hidden" id="waitPanel">
         <div class="wait-title">🏁 你已抵達終點！</div>
         <div class="wait-sub" id="waitSub">等待對手完賽…</div>
+        <!-- 對手 live 打字視圖：由累計進度還原到字元級（雙方站名資料相同） -->
+        <div class="spec-live">
+          <div class="spec-next">對手正在打 <b id="specZh"></b><span class="spec-kpm" id="specKpm"></span></div>
+          <div class="spec-word" id="specWord"></div>
+        </div>
         <div class="emoji-row" id="emojiRow" aria-label="丟表情給對手">
           <button class="emoji-btn" type="button">😏</button>
           <button class="emoji-btn" type="button">🐢</button>

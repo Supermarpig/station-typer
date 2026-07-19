@@ -14,7 +14,7 @@ const els = {
   pkSetup: $("pkSetup"), pkNick: $("pkNick"), pkJoinToggle: $("pkJoinToggle"),
   pkCodeRow: $("pkCodeRow"), pkCodeInput: $("pkCodeInput"), pkCodeGo: $("pkCodeGo"),
   pkOverlay: $("pkOverlay"), pkCard: $("pkCard"), pkToast: $("pkToast"), rematchNote: $("rematchNote"),
-  mapHead: $("mapHead"), mapRoundel: $("mapRoundel"), mapNow: $("mapNow"), mapDir: $("mapDir"),
+  mapHead: $("mapHead"), mapRoundel: $("mapRoundel"), mapNow: $("mapNow"), mapDir: $("mapDir"), mapRival: $("mapRival"),
   mapView: $("mapView"),
   scene: $("scene"), sceneShake: $("sceneShake"),
   train: $("train"), rivalTrain: $("rivalTrain"), speedlines: $("speedlines"), sweep: $("sweep"),
@@ -25,6 +25,7 @@ const els = {
   kmh: $("kmh"), gaugeFill: $("gaugeFill"),
   ghost: $("ghostInput"), imeWarn: $("imeWarn"), typingPanel: $("typingPanel"), typeHint: $("typeHint"),
   waitPanel: $("waitPanel"), waitSub: $("waitSub"), emojiRow: $("emojiRow"),
+  specZh: $("specZh"), specKpm: $("specKpm"), specWord: $("specWord"),
   langEn: $("langEn"), langZh: $("langZh"), footHint: $("footHint"),
   countdown: $("countdown"),
   backBtn: $("backBtn"), retryBtn: $("retryBtn"), pickBtn: $("pickBtn"),
@@ -420,6 +421,7 @@ function startGame(line, pkRace) {
   const battle = state.mode === "battle";
   els.rivalTrain.classList.toggle("hidden", !battle);
   els.leadChip.classList.toggle("hidden", !battle);
+  els.mapRival.classList.toggle("hidden", !battle);
   if (battle) {
     els.rivalTrain.innerHTML = trainSVG("#94a3b8") + `<div class="nametag">${esc(state.rivalDef.name)}</div>`;
     els.rivalTrain.style.transform = "translate3d(0,0,0)";
@@ -782,8 +784,11 @@ function rivalStation() {
 function updateLeadChip() {
   const diff = state.idx - state.rival.idx;
   els.leadChip.classList.toggle("behind", diff < 0);
-  const main = diff > 0 ? `領先 ${diff} 站` : diff < 0 ? `落後 ${-diff} 站` : "並駕齊驅";
-  els.leadChip.innerHTML = `<span>${main}</span><small>${esc(state.rivalDef.name)}・${rivalStation().zh}</small>`;
+  els.leadChip.textContent =
+    diff > 0 ? `領先 ${diff} 站` : diff < 0 ? `落後 ${-diff} 站` : "並駕齊驅";
+  // 對手位置膠囊（地圖標題列）：站名放大才一眼看得到對手在哪
+  els.mapRival.innerHTML =
+    `<i class="rv-dot"></i><span class="rv-name">${esc(state.rivalDef.name)}</span>${rivalStation().zh}`;
 }
 
 function renderWord() {
@@ -1108,6 +1113,8 @@ const pk = {
   state: "idle",      // idle | waiting | racing | done
   oppChars: 0,        // 對手最後回報的累計字元數
   oppFin: false,      // 對手已衝線（勝負已定，等自己完賽才結算）
+  oppCps: 0,          // 對手手速估計（字元/秒，觀戰畫面用）
+  lastPAt: 0, lastPChars: 0, // 上一筆進度的時刻與字數（算手速用）
   playAt: 0,          // 本地時鐘的起跑時刻（由伺服器 startAt 校正時差而來）
   lastSend: 0, sendTimer: 0, emojiAt: 0,
   closing: false,     // 自己主動離開，close 事件不當斷線處理
@@ -1263,6 +1270,8 @@ function pkHandle(msg) {
     pk.state = "racing";
     pk.oppChars = 0;
     pk.oppFin = false;
+    pk.oppCps = 0;
+    pk.lastPAt = pk.lastPChars = 0;
     pk.oppWants = false;
     pk.rematchSent = false;
     els.pkOverlay.classList.add("hidden");
@@ -1270,7 +1279,18 @@ function pkHandle(msg) {
     startGame(pk.line, true);
     return;
   }
-  if (msg.t === "p") { pk.oppChars = msg.c; return; }
+  if (msg.t === "p") {
+    // 順便估手速（指數平滑）：觀戰畫面的 KPM 與場景速度用
+    const now = performance.now();
+    if (pk.lastPAt && msg.c > pk.lastPChars) {
+      const inst = (msg.c - pk.lastPChars) / Math.max((now - pk.lastPAt) / 1000, 0.05);
+      pk.oppCps = pk.oppCps * 0.6 + inst * 0.4;
+    }
+    pk.lastPAt = now;
+    pk.lastPChars = msg.c;
+    pk.oppChars = msg.c;
+    return;
+  }
   if (msg.t === "fin") { // 有人先衝線：勝負已定，但等雙方都完賽才結算
     if (msg.role !== pk.role) {
       pk.oppFin = true;
@@ -1413,7 +1433,10 @@ function pkSendProgress(flush) {
 function showWaitPanel() {
   els.typingPanel.classList.add("hidden");
   els.waitPanel.classList.remove("hidden");
+  els.specWord.classList.toggle("zh", state.lang === "zh");
+  specLastChars = -1;
   updateWaitSub();
+  updateSpecView();
 }
 
 function updateWaitSub() {
@@ -1422,6 +1445,33 @@ function updateWaitSub() {
   els.waitSub.textContent = behind > 0
     ? `等待 ${pk.oppName || "對手"} 完賽 — 還在 ${rivalStation().zh}・落後 ${behind} 站`
     : `${pk.oppName || "對手"} 即將抵達終點…`;
+}
+
+/* 對手 live 打字視圖：由累計字元數還原「正在打哪個字、打到第幾個字元」。
+   只有打對的字元會回報，所以看到的是乾淨進度（不含對方的誤擊）。 */
+let specLastChars = -1;
+
+function updateSpecView() {
+  els.specKpm.textContent = `${Math.round(pk.oppCps * 60)} KPM`;
+  const chars = Math.min(pk.oppChars, state.totalChars);
+  if (chars === specLastChars) return; // 字元沒動就不重繪
+  specLastChars = chars;
+  // 由 cum 找目前單字：cum[wi] <= chars < cum[wi+1]
+  let wi = 0;
+  while (wi < state.cum.length - 2 && chars >= state.cum[wi + 1]) wi++;
+  const st = state.line.stations[wi];
+  const w = stationWord(st);
+  const pos = Math.min(chars - state.cum[wi], w.length);
+  els.specZh.textContent = st.zh;
+  els.specWord.innerHTML = [...w]
+    .map((ch, k) => {
+      const cls = ["ch"];
+      if (ch === " ") cls.push("sp");
+      if (k < pos) cls.push("done");
+      else if (k === pos) cls.push("cur");
+      return `<span class="${cls.join(" ")}">${ch === " " ? "&nbsp;" : ch}</span>`;
+    })
+    .join("");
 }
 
 /* 表情：先完賽者丟到對手螢幕上（嘲諷/加油皆宜），客端也做冷卻防連點 */
@@ -1444,18 +1494,26 @@ els.emojiRow.addEventListener("click", (ev) => {
   if (btn) pkSendEmoji(btn.textContent.trim(), btn);
 });
 
-/* 表情浮出：接收方大顆彈在畫面中央偏上，發送方小顆從等待面板飄出 */
+/* 表情禮物：全屏由下往上漂一串（直播禮物感）。接收方大顆一串，發送方小顆幾枚當回饋 */
 function emojiFloat(e, mine) {
-  if (els.fxScreen.childElementCount > 160) return;
-  const s = document.createElement("span");
-  s.className = "emoji-float" + (mine ? " mine" : "");
-  s.textContent = e;
-  const dx = (Math.random() - 0.5) * 120;
-  s.style.left = `calc(50% + ${dx.toFixed(0)}px)`;
-  s.style.top = mine ? "58%" : "30%";
-  s.addEventListener("animationend", () => s.remove());
-  setTimeout(() => s.remove(), 2600); // reduced-motion 等情況的保險移除
-  els.fxScreen.appendChild(s);
+  const count = reducedMotion ? 1 : mine ? 5 : 14; // reduced-motion：靜態單顆就好
+  for (let i = 0; i < count; i++) {
+    if (els.fxScreen.childElementCount > 160) return;
+    const s = document.createElement("span");
+    s.className = "emoji-float" + (mine ? " mine" : "");
+    s.textContent = e;
+    s.style.left = (4 + Math.random() * 88).toFixed(1) + "vw";
+    s.style.setProperty("--dx", ((Math.random() - 0.5) * 140).toFixed(0) + "px");
+    s.style.setProperty("--s", (0.7 + Math.random() * 0.9).toFixed(2));
+    s.style.setProperty("--rot", ((Math.random() - 0.5) * 50).toFixed(0) + "deg");
+    const dur = 2.4 + Math.random() * 1.6;
+    const delay = Math.random() * 0.55;
+    s.style.animationDuration = dur.toFixed(2) + "s";
+    s.style.animationDelay = delay.toFixed(2) + "s";
+    s.addEventListener("animationend", () => s.remove());
+    setTimeout(() => s.remove(), (dur + delay) * 1000 + 600); // reduced-motion 等情況的保險移除
+    els.fxScreen.appendChild(s);
+  }
 }
 
 function pkRematch() {
@@ -1597,6 +1655,12 @@ function tick(now) {
     const fullCps = state.lang === "zh" ? 2.2 : 6; // 滿速門檻：中文選字節奏比英打慢
     const target = state.playing && state.startTime ? 0.18 + Math.min(cps / fullCps, 1) * (MAX_SPEED - 0.2) : 0;
     speed += (target - speed) * 0.06;
+  } else if (state.spectating) {
+    // 觀戰：場景速度跟著對手的手速跑，像坐在對方車上看他打
+    if (now - pk.lastPAt > 1500) pk.oppCps *= 0.97; // 對手停手，緩緩滑行減速
+    const fullCps = state.lang === "zh" ? 2.2 : 6;
+    const target = 0.18 + Math.min(pk.oppCps / fullCps, 1) * (MAX_SPEED - 0.2);
+    speed += (target - speed) * 0.06;
   } else {
     speed += (0 - speed) * 0.05;
   }
@@ -1620,6 +1684,7 @@ function tick(now) {
       focusMapCam(true); // 對手抵站：鏡頭跟著飛下一段
       updateWaitSub();
     }
+    if (state.spectating && frame % 6 === 0) updateSpecView(); // 對手 live 打字視圖
     if (!state.pk && state.rival.chars >= state.totalChars) {
       state.rival.chars = state.totalChars;
       updateLeadChip();
