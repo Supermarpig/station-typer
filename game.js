@@ -285,6 +285,8 @@ function setMode(mode) {
   els.pkSetup.classList.toggle("hidden", mode !== "pk");
   if (mode === "pk" && !els.pkNick.value) {
     els.pkNick.value = localStorage.getItem(NICK_KEY) || "";
+    // 桌機：暱稱還空著就直接聚焦引導第一步（觸控不搶，避免鍵盤彈出）
+    if (!els.pkNick.value && !matchMedia("(pointer: coarse)").matches) els.pkNick.focus();
   }
 }
 

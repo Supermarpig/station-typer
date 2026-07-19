@@ -37,9 +37,9 @@
       </div>
       <div class="rival-row hidden" id="rivalRow"></div>
       <div class="pk-setup hidden" id="pkSetup">
-        <input class="ti" id="pkNick" type="text" maxlength="12" placeholder="輸入暱稱" autocomplete="off" />
-        <p class="pk-hint">點下方任一路線，<b>開新車次</b>邀請隊友</p>
-        <button class="join-by-code" id="pkJoinToggle" type="button">收到車次號碼？輸入車次加入</button>
+        <div class="pk-step"><span class="step-no">1</span><input class="ti" id="pkNick" type="text" maxlength="12" placeholder="輸入暱稱" autocomplete="off" /></div>
+        <p class="pk-hint"><span class="step-no">2</span>點下方任一路線<b>開新車次</b>，分享連結給隊友<span class="pk-arrow" aria-hidden="true">▼</span></p>
+        <button class="join-by-code" id="pkJoinToggle" type="button">已有車次號碼？輸入車次加入</button>
         <div class="pk-code-row hidden" id="pkCodeRow">
           <input class="ti" id="pkCodeInput" type="text" inputmode="numeric" maxlength="4" placeholder="4 位車次號" autocomplete="off" />
           <button class="ghost-btn" id="pkCodeGo" type="button">前往</button>

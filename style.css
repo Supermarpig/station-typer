@@ -966,13 +966,48 @@ button:focus-visible, .line-card:focus-visible {
 
 /* ─── 好友對戰（車次房間）───────────────────────────── */
 /* 選線畫面：好友對戰設定列 */
-.pk-setup { display: flex; flex-direction: column; align-items: center; gap: 10px; }
-.pk-setup .ti { width: 190px; text-align: center; }
-.pk-hint { font-size: 12px; color: var(--ink-dim); }
-.pk-hint b { color: var(--ink-mute); }
+/* 好友對戰設定卡：玻璃卡片 + 步驟引導，切到此模式時彈入 */
+.pk-setup {
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  width: min(400px, 94%);
+  margin: 0 auto;
+  padding: 16px 18px 13px;
+  background: var(--glass);
+  border: 1px solid var(--glass-edge);
+  border-radius: var(--radius-m);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 10px 34px #00000055, 0 0 26px #ffffff17;
+  animation: pkSetupIn 0.32s var(--ease-out);
+}
+@keyframes pkSetupIn {
+  from { opacity: 0; transform: translateY(-8px) scale(0.97); }
+}
+.pk-step { display: flex; align-items: center; gap: 10px; }
+.step-no {
+  flex: none;
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  background: var(--ink);
+  color: #10141f;
+  font-size: 12px;
+  font-weight: 800;
+  display: inline-grid; place-items: center;
+}
+.pk-hint .step-no { margin-right: 8px; vertical-align: -4px; }
+.pk-setup .ti { width: 200px; text-align: center; font-size: 15px; }
+.pk-hint { font-size: 13px; color: var(--ink-mute); }
+.pk-hint b { color: var(--ink); }
+.pk-arrow {
+  display: inline-block;
+  margin-left: 7px;
+  font-size: 11px;
+  color: var(--ink);
+  animation: pkArrow 1.4s ease-in-out infinite;
+}
+@keyframes pkArrow { 50% { transform: translateY(4px); } }
 .join-by-code {
   font-size: 12px;
-  color: var(--ink-dim);
+  color: var(--ink-mute);
   background: none;
   border: none;
   text-decoration: underline;
