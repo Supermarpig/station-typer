@@ -899,6 +899,7 @@ function handleChar(ch) {
     state.combo += 1;
     state.maxCombo = Math.max(state.maxCombo, state.combo);
     state.keyTimes.push(performance.now());
+    lastOkAt = performance.now(); // 打出字了：緊張感鬆開
     pkSendProgress(false); // 好友對戰：節流回報進度
     SFX.tick(state.combo);
     if (state.combo > 0 && state.combo % 25 === 0) {
@@ -1435,6 +1436,7 @@ function finish(playerWon) {
 
 /* ─── 主迴圈：速度引擎 + 對手 + 儀表 + 鏡頭 ─────────── */
 let lastT = performance.now();
+let lastOkAt = 0; // 最後一次打出正確字的時刻（卡關緊張音樂用）
 
 function tick(now) {
   const dt = Math.min(now - lastT, 100);
@@ -1506,6 +1508,15 @@ function tick(now) {
     els.gaugeFill.style.strokeDashoffset = (GAUGE_LEN * (1 - Math.min(speed / MAX_SPEED, 1))).toFixed(1);
     els.kmh.textContent = Math.round((speed / MAX_SPEED) * 130);
     SFX.setSpeed(speed);
+  }
+
+  // 卡關緊張音樂：3.5 秒打不出字開始浮現，10 秒拉滿；打出字（或收場）立即鬆開
+  if (state.playing && !state.finished) {
+    if (!lastOkAt) lastOkAt = now;
+    if (frame % 6 === 0) SFX.setTension(Math.min(Math.max((now - lastOkAt - 3500) / 6500, 0), 1));
+  } else if (lastOkAt) {
+    lastOkAt = 0;
+    SFX.setTension(0);
   }
 
   // 高速時：鏡頭微震 + 車身前傾
@@ -1585,7 +1596,10 @@ document.addEventListener("click", () => {
 });
 
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden) state.keyTimes = [];
+  if (document.hidden) {
+    state.keyTimes = [];
+    lastOkAt = 0; // 回到分頁重新起算，不然離開多久回來就滿級緊張
+  }
 });
 
 let resizeTimer;
