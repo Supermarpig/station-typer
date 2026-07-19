@@ -217,6 +217,7 @@ let mapU = 0, mapRivalU = 0;
 let mapSparse = [];    // 擁擠時隱藏部分站名
 const mSvg = { fill: null, train: null, rival: null, dots: [], names: [] };
 let lMap = null, lLayer = null;
+let camBusyUntil = 0; // 鏡頭飛行結束時刻：飛行中投影不穩，暫停向量更新
 const lRefs = { done: null, dots: [], train: null, rival: null };
 
 /* ─── 路線選擇畫面 ──────────────────────────────────── */
@@ -562,8 +563,13 @@ function focusMapCam(animate) {
   const i = Math.min(atStation(), sts.length - 2);
   const bounds = L.latLngBounds([sts[i].pos, sts[i + 1].pos]);
   const opts = { padding: [36, 36], maxZoom: 15.5 };
-  if (animate && !reducedMotion) lMap.flyToBounds(bounds, { ...opts, duration: 1.1 });
-  else lMap.fitBounds(bounds, { ...opts, animate: false });
+  if (animate && !reducedMotion) {
+    camBusyUntil = performance.now() + 1250; // 飛行 1.1s + 緩衝
+    lMap.flyToBounds(bounds, { ...opts, duration: 1.1 });
+  } else {
+    camBusyUntil = 0;
+    lMap.fitBounds(bounds, { ...opts, animate: false });
+  }
 }
 
 function latLngAt(u) {
@@ -1487,14 +1493,17 @@ function tick(now) {
     mapU += (playerUnits() - mapU) * 0.12;
     if (state.mode === "battle") mapRivalU += (rivalUnits() - mapRivalU) * 0.12;
     if (mapMode === "leaflet" && lRefs.train) {
-      const p = latLngAt(mapU);
-      lRefs.train.setLatLng(p);
-      if (frame % 3 === 0) {
-        const done = state.line.stations.slice(0, Math.floor(mapU) + 1).map((s) => s.pos);
-        done.push(p);
-        lRefs.done.setLatLngs(done);
+      // 鏡頭飛行中不動向量：飛行時中途 setLatLng 會投影到過渡座標系，線與列車看起來亂跑
+      if (performance.now() >= camBusyUntil) {
+        const p = latLngAt(mapU);
+        lRefs.train.setLatLng(p);
+        if (frame % 3 === 0) {
+          const done = state.line.stations.slice(0, Math.floor(mapU) + 1).map((s) => s.pos);
+          done.push(p);
+          lRefs.done.setLatLngs(done);
+        }
+        if (lRefs.rival) lRefs.rival.setLatLng(latLngAt(mapRivalU));
       }
-      if (lRefs.rival) lRefs.rival.setLatLng(latLngAt(mapRivalU));
     } else if (mapMode === "svg" && mapPts.length) {
       positionMapMarkers();
     }
