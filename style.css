@@ -846,6 +846,7 @@ button:focus-visible, .line-card:focus-visible {
 .wait-title { font-size: 18px; font-weight: 800; letter-spacing: 0.08em; }
 .wait-sub { margin-top: 6px; font-size: 13px; color: var(--ink-mute); }
 .wait-hint { margin-top: 8px; font-size: 11px; color: var(--ink-dim); }
+.settle-btn { margin-top: 10px; font-size: 12px; }
 
 /* 對手 live 打字視圖：對手色系，跟自己的打字面板做出區隔 */
 .spec-live {

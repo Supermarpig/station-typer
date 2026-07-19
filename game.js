@@ -25,7 +25,7 @@ const els = {
   kmh: $("kmh"), gaugeFill: $("gaugeFill"),
   ghost: $("ghostInput"), imeWarn: $("imeWarn"), typingPanel: $("typingPanel"), typeHint: $("typeHint"),
   waitPanel: $("waitPanel"), waitSub: $("waitSub"), emojiRow: $("emojiRow"),
-  specZh: $("specZh"), specKpm: $("specKpm"), specWord: $("specWord"),
+  specZh: $("specZh"), specKpm: $("specKpm"), specWord: $("specWord"), settleBtn: $("settleBtn"),
   langEn: $("langEn"), langZh: $("langZh"), footHint: $("footHint"),
   countdown: $("countdown"),
   backBtn: $("backBtn"), retryBtn: $("retryBtn"), pickBtn: $("pickBtn"),
@@ -1315,6 +1315,8 @@ function pkHandle(msg) {
       showPkToast("對手已下車 — 你獲勝！");
     } else if (msg.reason === "timeout" && won) {
       showPkToast("等待逾時，直接結算", true);
+    } else if (msg.reason === "called" && !won) {
+      showPkToast("對手提前結算，比賽結束", true);
     } else if (!won) {
       pk.oppChars = state.totalChars; // 對手衝線，畫面同步到終點
     }
@@ -1434,6 +1436,8 @@ function showWaitPanel() {
   els.typingPanel.classList.add("hidden");
   els.waitPanel.classList.remove("hidden");
   els.specWord.classList.toggle("zh", state.lang === "zh");
+  els.settleBtn.disabled = false;
+  els.settleBtn.textContent = "不等了，直接結算";
   specLastChars = -1;
   updateWaitSub();
   updateSpecView();
@@ -1492,6 +1496,14 @@ function pkSendEmoji(e, btn) {
 els.emojiRow.addEventListener("click", (ev) => {
   const btn = ev.target.closest(".emoji-btn");
   if (btn) pkSendEmoji(btn.textContent.trim(), btn);
+});
+
+/* 先完賽者不想等：提前結算（伺服器驗證只有已完賽者能按） */
+els.settleBtn.addEventListener("click", () => {
+  if (!state.spectating || !pk.ws || pk.ws.readyState !== 1) return;
+  els.settleBtn.disabled = true;
+  els.settleBtn.textContent = "結算中…";
+  pk.ws.send(JSON.stringify({ t: "settle" }));
 });
 
 /* 表情禮物：全屏由下往上漂一串（直播禮物感）。接收方大顆一串，發送方小顆幾枚當回饋 */

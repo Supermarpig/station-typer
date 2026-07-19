@@ -195,6 +195,12 @@ export class Room extends DurableObject {
       return;
     }
 
+    // 先完賽者不想等了：提前結算（勝負早已定，對手的賽程就此打住）
+    if (msg.t === "settle" && meta.state === "racing" && meta.firstFinish === att.role) {
+      await this.settle(meta, meta.firstFinish, "called");
+      return;
+    }
+
     // 等待期間丟表情（嘲諷/加油）：只有已完賽者能丟，白名單 + 冷卻防洗版
     if (msg.t === "e" && meta.state === "racing" && EMOJI_SET.has(msg.e)) {
       if (meta.firstFinish !== att.role) return;
