@@ -5,9 +5,10 @@ const SFX = (() => {
   let ctx = null;
   let master = null;
   let engine = null;
-  let tension = null;      // 卡關緊張層：小二度低音墊 + 心跳
-  let tensionLevel = 0;
-  let tensionTimer = 0;
+  let tensionLevel = 0;    // 卡關緊張層：心跳 + 碼表秒針（安靜但發毛）
+  let tensionTimer = 0;    // 心跳排程
+  let tickTimer = 0;       // 秒針排程
+  let tickAlt = false;
   let muted = localStorage.getItem("stationTyper.muted") === "1";
 
   function ensure() {
@@ -65,58 +66,33 @@ const SFX = (() => {
     engine.filter.frequency.setTargetAtTime(300 + k * 1300, t, 0.2);
   }
 
-  function buildTension() {
-    // 相差小二度的雙鋸齒低音：不安定感的來源；低通濾住只留悶悶的底
-    const o1 = ctx.createOscillator();
-    o1.type = "sawtooth";
-    o1.frequency.value = 110;
-    const o2 = ctx.createOscillator();
-    o2.type = "sawtooth";
-    o2.frequency.value = 116.5;
-    const filter = ctx.createBiquadFilter();
-    filter.type = "lowpass";
-    filter.frequency.value = 380;
-    filter.Q.value = 1.2;
-    // 顫音：緩慢起伏讓墊底「活著」
-    const trem = ctx.createGain();
-    trem.gain.value = 1;
-    const lfo = ctx.createOscillator();
-    lfo.frequency.value = 4.8;
-    const lfoDepth = ctx.createGain();
-    lfoDepth.gain.value = 0.35;
-    lfo.connect(lfoDepth).connect(trem.gain);
-    const g = ctx.createGain();
-    g.gain.value = 0;
-    o1.connect(filter);
-    o2.connect(filter);
-    filter.connect(trem).connect(g).connect(master);
-    o1.start();
-    o2.start();
-    lfo.start();
-    tension = { g, filter };
-  }
-
   function heartbeat() {
     if (!tensionLevel) { tensionTimer = 0; return; } // 鬆開後自然停拍
     if (!muted) {
-      const g = 0.05 + tensionLevel * 0.09;
+      const g = 0.04 + tensionLevel * 0.07;
       blip(85, 0.14, { type: "sine", gain: g, slide: -25 });
       blip(72, 0.16, { type: "sine", gain: g * 0.8, when: 0.16, slide: -20 });
     }
     tensionTimer = setTimeout(heartbeat, 950 - tensionLevel * 380); // 越緊張心跳越快
   }
 
-  // level 0～1：卡關緊張度，0 = 立即鬆開
+  function clockTick() {
+    if (!tensionLevel) { tickTimer = 0; return; }
+    if (!muted) {
+      tickAlt = !tickAlt; // 滴、答交替：像碼表在倒數
+      blip(tickAlt ? 2100 : 1700, 0.03, { type: "triangle", gain: 0.012 + tensionLevel * 0.022 });
+    }
+    tickTimer = setTimeout(clockTick, 500);
+  }
+
+  // level 0～1：卡關緊張度，0 = 立即鬆開（定時器下一拍自然停）
   function setTension(level) {
     level = Math.max(0, Math.min(level, 1));
     tensionLevel = level;
-    if (!level && !tension) return; // 還沒建過又要關：不必喚醒 AudioContext
+    if (!level) return;
     if (!ensure()) return;
-    if (!tension) buildTension();
-    const t = ctx.currentTime;
-    tension.g.gain.setTargetAtTime(level * 0.11, t, level ? 0.6 : 0.2);
-    tension.filter.frequency.setTargetAtTime(360 + level * 480, t, 0.5); // 越緊張越亮
-    if (level > 0 && !tensionTimer) heartbeat();
+    if (!tensionTimer) heartbeat();
+    if (!tickTimer) clockTick();
   }
 
   function blip(freq, dur, { type = "sine", gain = 0.08, when = 0, slide = 0 } = {}) {
