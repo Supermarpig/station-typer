@@ -707,6 +707,9 @@ button:focus-visible, .line-card:focus-visible {
 .m-train.rival { filter: drop-shadow(0 0 6px color-mix(in srgb, var(--rival) 55%, transparent)); }
 
 .spacer { flex: 1; min-height: clamp(120px, 22vh, 300px); }
+/* 觀戰面板比打字面板高：等待期間縮小中段留白，面板才不會被擠出畫面外 */
+#game:has(.wait-panel:not(.hidden)) .spacer { min-height: 20px; }
+#game:has(.wait-panel:not(.hidden)) .map-view.leaflet-mode { height: clamp(200px, 26vh, 300px); }
 
 /* ─── 底部 ──────────────────────────────────────────── */
 .bottom-ui { width: min(880px, 100%); margin: 0 auto; }
@@ -1330,6 +1333,16 @@ button:focus-visible, .line-card:focus-visible {
   .map-rival { font-size: 13px; padding: 3px 9px; gap: 5px; }
   .map-rival .rv-dot { width: 7px; height: 7px; }
   .map-rival .rv-name { display: none; }
+
+  /* 觀戰等待面板：小螢幕收緊間距，全部塞進一屏 */
+  .wait-panel { padding: 10px 12px 12px; }
+  .wait-title { font-size: 15px; }
+  .spec-live { margin-top: 8px; padding: 8px 10px 10px; }
+  .spec-word { font-size: 16px; }
+  .emoji-row { margin-top: 8px; gap: 8px; }
+  .emoji-btn { font-size: 20px; padding: 6px 10px; }
+  .wait-hint { display: none; }
+  .settle-btn { margin-top: 8px; }
 
   /* 鍵盤打開（kb-open）：精簡非必要 UI，把空間留給地圖與題目 */
   body.kb-open .hud-right,

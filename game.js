@@ -1441,6 +1441,13 @@ function showWaitPanel() {
   specLastChars = -1;
   updateWaitSub();
   updateSpecView();
+  // 觀戰時地圖高度縮小（CSS :has），Leaflet 需重算尺寸再取景
+  if (mapMode === "leaflet" && lMap) {
+    setTimeout(() => {
+      lMap.invalidateSize({ animate: false });
+      focusMapCam(false);
+    }, 60);
+  }
 }
 
 function updateWaitSub() {
