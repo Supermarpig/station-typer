@@ -24,6 +24,7 @@ const els = {
   statKpm: $("statKpm"), statAcc: $("statAcc"), statCombo: $("statCombo"),
   kmh: $("kmh"), gaugeFill: $("gaugeFill"),
   ghost: $("ghostInput"), imeWarn: $("imeWarn"), typingPanel: $("typingPanel"), typeHint: $("typeHint"),
+  waitPanel: $("waitPanel"), waitSub: $("waitSub"), emojiRow: $("emojiRow"),
   langEn: $("langEn"), langZh: $("langZh"), footHint: $("footHint"),
   countdown: $("countdown"),
   backBtn: $("backBtn"), retryBtn: $("retryBtn"), pickBtn: $("pickBtn"),
@@ -199,6 +200,8 @@ const state = {
   keyTimes: [],
   finished: false,
   playing: false,
+  spectating: false, // 好友對戰：自己已衝線，觀戰等待對手完賽
+  finishedAt: 0,     // 自己衝線的時刻（等待期間不能灌進用時）
   cum: [],          // 各單字前的累計字元數
   totalChars: 0,
   rival: { chars: 0, idx: 0 },
@@ -378,11 +381,15 @@ function startGame(line, pkRace) {
   state.keyTimes = [];
   state.finished = false;
   state.playing = false;
+  state.spectating = false;
+  state.finishedAt = 0;
   state.rival = { chars: 0, idx: 0 };
   state.countdownTimers.forEach(clearTimeout);
   state.countdownTimers = [];
   speed = 0;
   rivalX = 0;
+  els.typingPanel.classList.remove("hidden");
+  els.waitPanel.classList.add("hidden");
 
   // 累計字元數（用於賽況換算）— 起點站也要打（發車確認），所以包含全部站名
   const words = line.stations.map(stationWord);
@@ -414,10 +421,9 @@ function startGame(line, pkRace) {
   els.rivalTrain.classList.toggle("hidden", !battle);
   els.leadChip.classList.toggle("hidden", !battle);
   if (battle) {
-    els.rivalTrain.innerHTML = trainSVG("#94a3b8") + `<div class="nametag">${state.rivalDef.name}</div>`;
+    els.rivalTrain.innerHTML = trainSVG("#94a3b8") + `<div class="nametag">${esc(state.rivalDef.name)}</div>`;
     els.rivalTrain.style.transform = "translate3d(0,0,0)";
-    els.leadChip.textContent = "並駕齊驅";
-    els.leadChip.classList.remove("behind");
+    updateLeadChip();
   }
 
   els.rematchNote.classList.add("hidden");
@@ -558,11 +564,13 @@ function buildLeafletMap() {
   updateMapDots();
 }
 
-/* 跟車鏡頭：只框住當前站與下一站（終點時框最後一段），抵站時平滑飛往下一段 */
+/* 跟車鏡頭：只框住當前站與下一站（終點時框最後一段），抵站時平滑飛往下一段。
+   觀戰等待時改跟對手的列車，先完賽者才看得到對方跑到哪 */
 function focusMapCam(animate) {
   if (mapMode !== "leaflet" || !lMap || !state.line) return;
   const sts = state.line.stations;
-  const i = Math.min(atStation(), sts.length - 2);
+  const at = state.spectating ? Math.max(state.rival.idx - 1, 0) : atStation();
+  const i = Math.min(at, sts.length - 2);
   const bounds = L.latLngBounds([sts[i].pos, sts[i + 1].pos]);
   const opts = { padding: [36, 36], maxZoom: 15.5 };
   // 用 CSS 縮放轉場而非 flyTo：flyTo 逐幀改縮放值，途中重畫向量會投影錯位（藍線亂跑）；
@@ -765,11 +773,17 @@ function updateMapDots() {
   });
 }
 
+/* 對手目前所在站（rival.idx 的「所在站」換算與 atStation 同規則） */
+function rivalStation() {
+  const n = state.line.stations.length;
+  return state.line.stations[Math.min(Math.max(state.rival.idx - 1, 0), n - 1)];
+}
+
 function updateLeadChip() {
   const diff = state.idx - state.rival.idx;
   els.leadChip.classList.toggle("behind", diff < 0);
-  els.leadChip.textContent =
-    diff > 0 ? `領先 ${diff} 站` : diff < 0 ? `落後 ${-diff} 站` : "並駕齊驅";
+  const main = diff > 0 ? `領先 ${diff} 站` : diff < 0 ? `落後 ${-diff} 站` : "並駕齊驅";
+  els.leadChip.innerHTML = `<span>${main}</span><small>${esc(state.rivalDef.name)}・${rivalStation().zh}</small>`;
 }
 
 function renderWord() {
@@ -1010,7 +1024,16 @@ function arrive() {
   if (state.mode === "battle") updateLeadChip();
   if (state.idx >= state.line.stations.length) {
     if (state.pk) {
-      state.playing = false; // 衝線：鎖輸入，等伺服器 end 訊息判定勝負
+      // 衝線：鎖輸入並記下時刻（結算用時不含等待），轉觀戰等雙方都完賽才結算
+      state.playing = false;
+      state.finishedAt = performance.now();
+      if (!pk.oppFin) {
+        state.spectating = true;
+        els.ghost.blur(); // 手機收鍵盤，讓出畫面看對手進度
+        SFX.chime();
+        showWaitPanel();
+        focusMapCam(true); // 鏡頭飛去跟對手的列車
+      }
     } else {
       finish(true);
     }
@@ -1084,8 +1107,9 @@ const pk = {
   line: null, lang: "en", myName: "", oppName: "",
   state: "idle",      // idle | waiting | racing | done
   oppChars: 0,        // 對手最後回報的累計字元數
+  oppFin: false,      // 對手已衝線（勝負已定，等自己完賽才結算）
   playAt: 0,          // 本地時鐘的起跑時刻（由伺服器 startAt 校正時差而來）
-  lastSend: 0, sendTimer: 0,
+  lastSend: 0, sendTimer: 0, emojiAt: 0,
   closing: false,     // 自己主動離開，close 事件不當斷線處理
   oppWants: false,    // 對手已按再戰
   oppGone: false,     // 對手已離開，再戰無望
@@ -1206,7 +1230,7 @@ function renderPkExpired(html) {
 
 function pkConnect() {
   pk.closing = false;
-  pk.oppWants = pk.oppGone = false;
+  pk.oppWants = pk.oppGone = pk.oppFin = false;
   pk.rematchSent = false;
   pk.oppChars = 0;
   pk.state = "waiting";
@@ -1238,6 +1262,7 @@ function pkHandle(msg) {
     pk.playAt = msg.startAt - (msg.now - Date.now()); // 用伺服器時間差校正本地起跑時刻
     pk.state = "racing";
     pk.oppChars = 0;
+    pk.oppFin = false;
     pk.oppWants = false;
     pk.rematchSent = false;
     els.pkOverlay.classList.add("hidden");
@@ -1246,13 +1271,30 @@ function pkHandle(msg) {
     return;
   }
   if (msg.t === "p") { pk.oppChars = msg.c; return; }
+  if (msg.t === "fin") { // 有人先衝線：勝負已定，但等雙方都完賽才結算
+    if (msg.role !== pk.role) {
+      pk.oppFin = true;
+      pk.oppChars = state.totalChars;
+      showPkToast(`${pk.oppName || "對手"}已抵達終點 — 撐到終點看成績！`, true);
+    }
+    return;
+  }
+  if (msg.t === "e") { // 對手（先完賽者）丟來的表情
+    emojiFloat(msg.e, false);
+    SFX.comboUp();
+    return;
+  }
   if (msg.t === "end") {
     if (pk.state !== "racing") return;
     pk.state = "done";
+    state.spectating = false;
+    els.waitPanel.classList.add("hidden");
     const won = msg.winner === pk.role;
     if (msg.reason === "forfeit") {
       pk.oppGone = true;
       showPkToast("對手已下車 — 你獲勝！");
+    } else if (msg.reason === "timeout" && won) {
+      showPkToast("等待逾時，直接結算", true);
     } else if (!won) {
       pk.oppChars = state.totalChars; // 對手衝線，畫面同步到終點
     }
@@ -1367,6 +1409,55 @@ function pkSendProgress(flush) {
   }
 }
 
+/* ─── 觀戰等待（先衝線者）─────────────────────────── */
+function showWaitPanel() {
+  els.typingPanel.classList.add("hidden");
+  els.waitPanel.classList.remove("hidden");
+  updateWaitSub();
+}
+
+function updateWaitSub() {
+  const n = state.line.stations.length;
+  const behind = n - state.rival.idx;
+  els.waitSub.textContent = behind > 0
+    ? `等待 ${pk.oppName || "對手"} 完賽 — 還在 ${rivalStation().zh}・落後 ${behind} 站`
+    : `${pk.oppName || "對手"} 即將抵達終點…`;
+}
+
+/* 表情：先完賽者丟到對手螢幕上（嘲諷/加油皆宜），客端也做冷卻防連點 */
+const EMOJI_COOLDOWN_MS = 900;
+
+function pkSendEmoji(e, btn) {
+  if (!state.spectating || !pk.ws || pk.ws.readyState !== 1) return;
+  const now = performance.now();
+  if (now - pk.emojiAt < EMOJI_COOLDOWN_MS) return;
+  pk.emojiAt = now;
+  pk.ws.send(JSON.stringify({ t: "e", e }));
+  emojiFloat(e, true); // 自己畫面也飄一個小的當回饋
+  btn.classList.remove("sent");
+  void btn.offsetWidth;
+  btn.classList.add("sent");
+}
+
+els.emojiRow.addEventListener("click", (ev) => {
+  const btn = ev.target.closest(".emoji-btn");
+  if (btn) pkSendEmoji(btn.textContent.trim(), btn);
+});
+
+/* 表情浮出：接收方大顆彈在畫面中央偏上，發送方小顆從等待面板飄出 */
+function emojiFloat(e, mine) {
+  if (els.fxScreen.childElementCount > 160) return;
+  const s = document.createElement("span");
+  s.className = "emoji-float" + (mine ? " mine" : "");
+  s.textContent = e;
+  const dx = (Math.random() - 0.5) * 120;
+  s.style.left = `calc(50% + ${dx.toFixed(0)}px)`;
+  s.style.top = mine ? "58%" : "30%";
+  s.addEventListener("animationend", () => s.remove());
+  setTimeout(() => s.remove(), 2600); // reduced-motion 等情況的保險移除
+  els.fxScreen.appendChild(s);
+}
+
 function pkRematch() {
   if (pk.oppGone || pk.rematchSent || !pk.ws || pk.ws.readyState !== 1) return;
   pk.rematchSent = true;
@@ -1415,7 +1506,11 @@ function pkClosed() {
 function finish(playerWon) {
   state.finished = true;
   state.playing = false;
-  const elapsed = state.startTime ? (performance.now() - state.startTime) / 1000 : 0;
+  state.spectating = false;
+  els.waitPanel.classList.add("hidden");
+  // 好友對戰先衝線者：用時凍結在衝線那一刻，觀戰等待不灌進成績
+  const endT = state.finishedAt || performance.now();
+  const elapsed = state.startTime ? (endT - state.startTime) / 1000 : 0;
   const mins = elapsed / 60;
   const kpm = mins > 0 ? Math.round(state.correct / mins) : 0;
   const total = state.correct + state.errors;
@@ -1508,8 +1603,8 @@ function tick(now) {
   layerAnims.forEach((a) => (a.playbackRate = speed));
   els.speedlines.style.opacity = Math.max(0, ((speed - 1.7) / 1.3) * 0.6).toFixed(3);
 
-  // 對手推進
-  if (state.mode === "battle" && state.playing && !state.finished) {
+  // 對手推進（觀戰等待時也要動：先完賽者看著對手繼續跑）
+  if (state.mode === "battle" && (state.playing || state.spectating) && !state.finished) {
     if (state.pk) {
       // 真人對手：朝最後收到的累計進度平滑逼近；勝負由伺服器 end 訊息判定
       state.rival.chars += (pk.oppChars - state.rival.chars) * Math.min(1, dt / 160);
@@ -1517,8 +1612,13 @@ function tick(now) {
       const jitter = 0.82 + 0.36 * (0.5 + 0.5 * Math.sin(now / 2300 + 1.3));
       state.rival.chars += (rivalKpmVal() / 60) * (dt / 1000) * jitter;
     }
+    const prevRivalIdx = state.rival.idx;
     while (state.rival.idx < state.cum.length - 1 && state.rival.chars >= state.cum[state.rival.idx + 1]) {
       state.rival.idx += 1;
+    }
+    if (state.spectating && state.rival.idx !== prevRivalIdx) {
+      focusMapCam(true); // 對手抵站：鏡頭跟著飛下一段
+      updateWaitSub();
     }
     if (!state.pk && state.rival.chars >= state.totalChars) {
       state.rival.chars = state.totalChars;
@@ -1699,6 +1799,9 @@ function backToPicker() {
   pkLeave(); // 好友對戰中離場＝下車（對戰中會被判棄賽）
   state.playing = false;
   state.finished = true;
+  state.spectating = false;
+  els.waitPanel.classList.add("hidden");
+  els.typingPanel.classList.remove("hidden");
   state.countdownTimers.forEach(clearTimeout);
   els.countdown.classList.add("hidden");
   els.game.classList.add("hidden");

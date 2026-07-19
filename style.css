@@ -485,8 +485,8 @@ button:focus-visible, .line-card:focus-visible {
 .line-chip .roundel.tra { font-size: 9px; }
 
 .lead-chip {
-  display: flex; align-items: center;
-  padding: 0 16px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 4px 16px;
   border-radius: var(--radius-s);
   font-size: 14px;
   font-weight: 800;
@@ -494,6 +494,14 @@ button:focus-visible, .line-card:focus-visible {
   color: var(--ink);
   border-color: var(--glow);
   box-shadow: 0 0 16px var(--glow-soft);
+}
+/* 對手目前所在站：名字・站名 */
+.lead-chip small {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--ink-mute);
+  white-space: nowrap;
 }
 .lead-chip.behind {
   color: color-mix(in srgb, var(--rival) 65%, #ffffff);
@@ -799,6 +807,51 @@ button:focus-visible, .line-card:focus-visible {
   0% { transform: translate3d(0, 0, 0) rotateZ(0) rotateX(0); opacity: 1; }
   85% { opacity: 1; }
   100% { transform: translate3d(var(--dx, 0px), 105vh, 0) rotateZ(var(--rz, 720deg)) rotateX(1200deg); opacity: 0; }
+}
+
+/* ─── 好友對戰：先衝線者的觀戰等待面板 ─────────────── */
+.wait-panel {
+  margin-top: 10px;
+  border-radius: var(--radius-m);
+  border-color: color-mix(in srgb, var(--line) 34%, #ffffff14);
+  box-shadow: 0 10px 40px #00000073, 0 0 30px var(--glow-soft);
+  padding: clamp(14px, 2.6vw, 20px) clamp(16px, 4vw, 28px);
+  text-align: center;
+}
+.wait-title { font-size: 18px; font-weight: 800; letter-spacing: 0.08em; }
+.wait-sub { margin-top: 6px; font-size: 13px; color: var(--ink-mute); }
+.wait-hint { margin-top: 8px; font-size: 11px; color: var(--ink-dim); }
+
+.emoji-row { margin-top: 12px; display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
+.emoji-btn {
+  font-size: 24px;
+  line-height: 1;
+  padding: 8px 12px;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--glass-edge);
+  background: var(--glass);
+  cursor: pointer;
+  transition: transform 120ms var(--ease-out), border-color 120ms;
+}
+.emoji-btn:hover { transform: translateY(-3px) scale(1.12); border-color: var(--glow); }
+.emoji-btn.sent { animation: emojiSent 400ms var(--ease-out); }
+@keyframes emojiSent { 30% { transform: scale(1.35) rotate(-8deg); } }
+
+/* 表情浮出：接收方大顆（畫面中央偏上），發送方小顆（等待面板上方） */
+.emoji-float {
+  position: absolute;
+  font-size: 56px;
+  transform: translateX(-50%);
+  animation: emojiPop 2.2s var(--ease-out) forwards;
+  filter: drop-shadow(0 6px 18px #000000cc);
+}
+.emoji-float.mine { font-size: 30px; animation-duration: 1.4s; }
+@keyframes emojiPop {
+  0% { opacity: 0; transform: translateX(-50%) scale(0.3); }
+  10% { opacity: 1; transform: translateX(-50%) scale(1.25); }
+  18% { transform: translateX(-50%) scale(1); }
+  80% { opacity: 1; }
+  100% { opacity: 0; transform: translateX(-50%) translateY(-90px) scale(1); }
 }
 
 .ime-warn, .pk-toast {
@@ -1184,6 +1237,7 @@ button:focus-visible, .line-card:focus-visible {
     transition-duration: 0.01ms !important;
   }
   .speedlines, .spark, .combo-float, .sweep { display: none; }
+  .emoji-float { animation: none !important; opacity: 1; } /* 表情是溝通訊息，靜態顯示後由 JS 移除 */
 }
 
 /* ─── 小螢幕 ─────────────────────────────────────────── */

@@ -125,6 +125,20 @@
         <input id="ghostInput" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="打字輸入" />
         <div class="fx-layer" id="fxLayer"></div>
       </div>
+      <!-- 好友對戰：先衝線者的觀戰等待面板（兩人都完賽才結算） -->
+      <div class="wait-panel glass hidden" id="waitPanel">
+        <div class="wait-title">🏁 你已抵達終點！</div>
+        <div class="wait-sub" id="waitSub">等待對手完賽…</div>
+        <div class="emoji-row" id="emojiRow" aria-label="丟表情給對手">
+          <button class="emoji-btn" type="button">😏</button>
+          <button class="emoji-btn" type="button">🐢</button>
+          <button class="emoji-btn" type="button">💨</button>
+          <button class="emoji-btn" type="button">🍿</button>
+          <button class="emoji-btn" type="button">💪</button>
+          <button class="emoji-btn" type="button">🔥</button>
+        </div>
+        <div class="wait-hint">丟個表情到對手螢幕上吧</div>
+      </div>
     </div>
 
     <div class="countdown hidden" id="countdown"></div>

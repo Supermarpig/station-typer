@@ -71,8 +71,11 @@ async function createRoom(req, env) {
 const WAIT_TTL = 10 * 60_000;    // 未發車的車次壽命
 const RACE_TTL = 40 * 60_000;    // 單場對戰時間上限
 const REMATCH_TTL = 15 * 60_000; // 結算後等待再戰的窗口
+const FINISH_WAIT_TTL = 5 * 60_000; // 先完賽者最多等對手這麼久，逾時直接結算
 const COUNTDOWN_MS = 3500;       // 發車廣播 → 正式起跑（前端倒數序列需 2600ms）
 const MAX_CPS = 25;              // 進度合理上限（1500 KPM，超出人類極限）
+const EMOJI_SET = new Set(["😏", "🐢", "💨", "🍿", "💪", "🔥"]); // 等待期間可丟的表情
+const EMOJI_COOLDOWN = 800;      // 表情冷卻（毫秒），防洗版
 
 const other = (role) => (role === "host" ? "guest" : "host");
 
@@ -81,6 +84,7 @@ export class Room extends DurableObject {
     super(ctx, env);
     // 進度只放記憶體 + 連線附件：休眠甦醒時由附件還原，不寫 storage
     this.progress = { host: 0, guest: 0 };
+    this.lastEmoji = { host: 0, guest: 0 }; // 表情冷卻計時（重啟歸零無妨）
     for (const ws of ctx.getWebSockets()) {
       const att = ws.deserializeAttachment();
       if (att) this.progress[att.role] = att.chars || 0;
@@ -95,6 +99,7 @@ export class Room extends DurableObject {
       state: "waiting", // waiting → racing → done（可再戰回 racing）
       guestName: null,
       startAt: 0,
+      firstFinish: null, // 先衝線的角色：勝負已定，但等雙方都完賽才結算
       rematch: { host: false, guest: false },
       createdAt: Date.now(),
     });
@@ -175,12 +180,28 @@ export class Room extends DurableObject {
       ws.serializeAttachment({ ...att, chars });
       this.sendTo(other(att.role), { t: "p", c: chars });
 
-      if (chars >= meta.totalChars) { // 先到終點者勝，以伺服器收到的順序為準
-        meta.state = "done";
-        await this.ctx.storage.put("meta", meta);
-        await this.ctx.storage.setAlarm(Date.now() + REMATCH_TTL);
-        this.broadcast({ t: "end", winner: att.role, reason: "finished" });
+      // 先到終點者勝（以伺服器收到的順序為準），但先不結算：
+      // 廣播 fin 讓先完賽者進入觀戰等待，等另一人也完賽（或逾時/離場）才一起結算
+      if (chars >= meta.totalChars && att.role !== meta.firstFinish) {
+        if (!meta.firstFinish) {
+          meta.firstFinish = att.role;
+          await this.ctx.storage.put("meta", meta);
+          await this.ctx.storage.setAlarm(Date.now() + FINISH_WAIT_TTL);
+          this.broadcast({ t: "fin", role: att.role });
+        } else {
+          await this.settle(meta, meta.firstFinish, "finished");
+        }
       }
+      return;
+    }
+
+    // 等待期間丟表情（嘲諷/加油）：只有已完賽者能丟，白名單 + 冷卻防洗版
+    if (msg.t === "e" && meta.state === "racing" && EMOJI_SET.has(msg.e)) {
+      if (meta.firstFinish !== att.role) return;
+      const now = Date.now();
+      if (now - this.lastEmoji[att.role] < EMOJI_COOLDOWN) return;
+      this.lastEmoji[att.role] = now;
+      this.sendTo(other(att.role), { t: "e", e: msg.e });
       return;
     }
 
@@ -211,11 +232,11 @@ export class Room extends DurableObject {
     if (!meta) return;
 
     if (meta.state === "racing") {
-      // 對戰中斷線 = 棄賽，另一方獲勝
-      meta.state = "done";
-      await this.ctx.storage.put("meta", meta);
-      await this.ctx.storage.setAlarm(Date.now() + REMATCH_TTL);
-      this.sendTo(other(att.role), { t: "end", winner: other(att.role), reason: "forfeit" });
+      // 對戰中斷線：未完賽者離開 = 棄賽；已完賽者（等待中）離開 = 直接結算，勝負不變
+      const winner = meta.firstFinish || other(att.role);
+      const reason = att.role === meta.firstFinish ? "finished" : "forfeit";
+      await this.settle(meta, winner, reason);
+      this.sendTo(other(att.role), { t: "gone" }); // 離開者不會回來，再戰無望
     } else if (meta.state === "waiting") {
       if (att.role === "guest") {
         meta.guestName = null;
@@ -233,9 +254,19 @@ export class Room extends DurableObject {
 
   webSocketError() { /* 錯誤後 runtime 會再觸發 webSocketClose，離場邏輯統一在那裡 */ }
 
+  /* 結算：勝負早在先衝線時就定了，這裡才廣播 end 讓雙方一起看結果 */
+  async settle(meta, winner, reason) {
+    meta.state = "done";
+    meta.firstFinish = null;
+    await this.ctx.storage.put("meta", meta);
+    await this.ctx.storage.setAlarm(Date.now() + REMATCH_TTL);
+    this.broadcast({ t: "end", winner, reason });
+  }
+
   async startRace(meta) {
     meta.state = "racing";
     meta.startAt = Date.now() + COUNTDOWN_MS;
+    meta.firstFinish = null;
     meta.rematch = { host: false, guest: false };
     this.progress = { host: 0, guest: 0 };
     for (const ws of this.ctx.getWebSockets()) {
@@ -249,6 +280,12 @@ export class Room extends DurableObject {
   }
 
   async alarm() {
+    // 先完賽者等待逾時：對手拖太久，直接結算（勝負不變）；其餘情況照舊過期清房
+    const meta = await this.ctx.storage.get("meta");
+    if (meta && meta.state === "racing" && meta.firstFinish) {
+      await this.settle(meta, meta.firstFinish, "timeout");
+      return;
+    }
     this.broadcast({ t: "expired" });
     await this.cleanup();
   }
