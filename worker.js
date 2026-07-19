@@ -5,7 +5,7 @@
 
 import { DurableObject } from "cloudflare:workers";
 
-const LINE_IDS = new Set(["BL", "R", "G", "O", "BR", "Y", "TRA-W", "TRA-E"]);
+const LINE_IDS = new Set(["BL", "R", "G", "O", "BR", "Y", "TRA-W", "TRA-WC", "TRA-WL", "TRA-E"]);
 const TOP_N = 10;
 const RATE_LIMIT = 5; // 同 IP 每分鐘最多上傳次數
 
