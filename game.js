@@ -29,6 +29,7 @@ const els = {
   backBtn: $("backBtn"), retryBtn: $("retryBtn"), pickBtn: $("pickBtn"),
   muteBtn: $("muteBtn"),
   uploadRow: $("uploadRow"), nickInput: $("nickInput"), uploadBtn: $("uploadBtn"), board: $("board"),
+  fxScreen: $("fxScreen"),
   hbTabs: $("hbTabs"), hbList: $("hbList"),
 };
 
@@ -841,6 +842,53 @@ function comboFloat(text) {
   els.fxLayer.appendChild(f);
 }
 
+/* ─── 彩帶（成就感擔當）───────────────────────────── */
+const CONFETTI_COLORS = ["#ffd166", "#ef476f", "#06d6a0", "#4cc9f0", "#f77f00", "#c77dff"];
+
+function confettiColors() {
+  return state.line ? CONFETTI_COLORS.concat(state.line.color) : CONFETTI_COLORS;
+}
+
+/* 抵站小噴發：從打字面板上緣拋出一把彩帶 */
+function confettiBurst() {
+  if (reducedMotion || els.fxScreen.childElementCount > 160) return;
+  const r = els.typingPanel.getBoundingClientRect();
+  const colors = confettiColors();
+  for (let i = 0; i < 14; i++) {
+    const s = document.createElement("span");
+    s.className = "confetti pop";
+    s.style.left = (r.left + r.width / 2 + (Math.random() - 0.5) * r.width * 0.5).toFixed(0) + "px";
+    s.style.top = (r.top + 6).toFixed(0) + "px";
+    s.style.background = colors[(Math.random() * colors.length) | 0];
+    s.style.setProperty("--dx", ((Math.random() - 0.5) * 200).toFixed(0) + "px");
+    s.style.setProperty("--up", (-40 - Math.random() * 80).toFixed(0) + "px");
+    s.style.setProperty("--down", (120 + Math.random() * 140).toFixed(0) + "px");
+    s.style.setProperty("--rz", ((Math.random() - 0.5) * 900).toFixed(0) + "deg");
+    s.style.animationDuration = (0.9 + Math.random() * 0.5).toFixed(2) + "s";
+    s.addEventListener("animationend", () => s.remove());
+    els.fxScreen.appendChild(s);
+  }
+}
+
+/* 完賽彩帶雨：全屏從天而降（單人完乘與對戰獲勝限定） */
+function confettiRain() {
+  if (reducedMotion) return;
+  const colors = confettiColors();
+  for (let i = 0; i < 80; i++) {
+    const s = document.createElement("span");
+    s.className = "confetti rain";
+    s.style.left = (Math.random() * 100).toFixed(1) + "vw";
+    s.style.top = "-16px";
+    s.style.background = colors[(Math.random() * colors.length) | 0];
+    s.style.setProperty("--dx", ((Math.random() - 0.5) * 180).toFixed(0) + "px");
+    s.style.setProperty("--rz", (540 + Math.random() * 720).toFixed(0) + "deg");
+    s.style.animationDuration = (1.8 + Math.random() * 1.6).toFixed(2) + "s";
+    s.style.animationDelay = (Math.random() * 0.9).toFixed(2) + "s";
+    s.addEventListener("animationend", () => s.remove());
+    els.fxScreen.appendChild(s);
+  }
+}
+
 /* 中打選錯字：把送出的錯字紅字飄出（例如目標「坪」卻送出「平」） */
 function wrongFloat(ch) {
   if (reducedMotion) return;
@@ -909,6 +957,7 @@ function handleChar(ch) {
     }
     if (state.pos >= w.length) {
       wordBurst();
+      confettiBurst();
       arrive();
     } else {
       renderWord();
@@ -1391,6 +1440,7 @@ function finish(playerWon) {
 
   if (state.mode === "battle") playerWon ? SFX.win() : SFX.lose();
   else SFX.terminal();
+  if (state.mode !== "battle" || playerWon) confettiRain(); // 敗北不慶祝
 
   const h2 = $("resultStation");
   h2.classList.remove("lose");
