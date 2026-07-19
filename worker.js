@@ -72,6 +72,7 @@ const WAIT_TTL = 10 * 60_000;    // 未發車的車次壽命
 const RACE_TTL = 40 * 60_000;    // 單場對戰時間上限
 const REMATCH_TTL = 15 * 60_000; // 結算後等待再戰的窗口
 const FINISH_WAIT_TTL = 5 * 60_000; // 先完賽者最多等對手這麼久，逾時直接結算
+const RECONNECT_GRACE = 25_000;  // 斷線重連寬限：部署切換或行動網路瞬斷，逾時才判定離場
 const COUNTDOWN_MS = 3500;       // 發車廣播 → 正式起跑（前端倒數序列需 2600ms）
 const MAX_CPS = 25;              // 進度合理上限（1500 KPM，超出人類極限）
 const EMOJI_SET = new Set(["😏", "🐢", "💨", "🍿", "💪", "🔥"]); // 等待期間可丟的表情
@@ -98,10 +99,16 @@ export class Room extends DurableObject {
       ...init,
       state: "waiting", // waiting → racing → done（可再戰回 racing）
       guestName: null,
+      guestKey: null,   // 隊友上車時發放，斷線後憑 key 重連
       startAt: 0,
       firstFinish: null, // 先衝線的角色：勝負已定，但等雙方都完賽才結算
+      settleAt: 0,       // 先衝線後的等待期限（0=無）
+      raceEndAt: 0,      // 單場時間上限
+      droppedAt: { host: 0, guest: 0 }, // 斷線時刻（0=在線）：寬限逾時才判定離場
+      winner: null, reason: null,       // 結算結果：離線期間結算的人重連時補發
       rematch: { host: false, guest: false },
       createdAt: Date.now(),
+      waitEndAt: Date.now() + WAIT_TTL,
     });
     await this.ctx.storage.setAlarm(Date.now() + WAIT_TTL);
     return true;
@@ -132,15 +139,20 @@ export class Room extends DurableObject {
     const url = new URL(req.url);
     const name = cleanName(url.searchParams.get("name"));
     const key = url.searchParams.get("key") || "";
+    meta.droppedAt ||= { host: 0, guest: 0 }; // 舊房相容
 
+    // 憑 key 可在任何狀態重連（部署切換、行動網路瞬斷）；沒 key 只能當新隊友上車
     let role;
     if (key && key === meta.hostKey) {
       role = "host";
+    } else if (key && meta.guestKey && key === meta.guestKey) {
+      role = "guest";
     } else {
       if (meta.state !== "waiting") return new Response("departed", { status: 409 });
       if (this.ctx.getWebSockets("guest").length) return new Response("full", { status: 409 });
       if (!name) return new Response("bad name", { status: 400 });
       role = "guest";
+      meta.guestKey = crypto.randomUUID(); // 上車即發 key，斷線後憑它回來
     }
 
     // 同角色重連（例如列車長重整頁面）：舊連線先請下車，不觸發離場邏輯
@@ -150,13 +162,29 @@ export class Room extends DurableObject {
     this.ctx.acceptWebSocket(pair[1], [role]);
     pair[1].serializeAttachment({
       role,
-      name: role === "host" ? meta.hostName : name,
+      name: role === "host" ? meta.hostName : (name || meta.guestName),
       chars: this.progress[role],
     });
 
-    if (role === "guest" && meta.guestName !== name) {
+    let dirty = false;
+    if (role === "guest" && name && meta.guestName !== name) {
       meta.guestName = name;
-      await this.ctx.storage.put("meta", meta);
+      dirty = true;
+    }
+    if (meta.droppedAt[role]) { // 寬限期內重連回來：清標記，通知對方
+      meta.droppedAt[role] = 0;
+      dirty = true;
+      if (meta.state === "racing") this.sendTo(other(role), { t: "back" });
+    }
+    if (dirty || role === "guest") await this.ctx.storage.put("meta", meta);
+    if (meta.state !== "done") await this.scheduleAlarm(meta); // 期限可能因清標記而改變
+
+    if (role === "guest") pair[1].send(JSON.stringify({ t: "key", key: meta.guestKey }));
+    if (meta.state === "racing") {
+      // 重連快照：對手進度 + 是否已有人衝線（DO 可能重啟過，客端收到後補報自己的進度）
+      pair[1].send(JSON.stringify({ t: "sync", s: "racing", c: this.progress[other(role)], fin: meta.firstFinish || null }));
+    } else if (meta.state === "done" && meta.winner) {
+      pair[1].send(JSON.stringify({ t: "sync", s: "done", winner: meta.winner, reason: meta.reason }));
     }
     this.broadcast(this.roomMsg(meta));
     return new Response(null, { status: 101, webSocket: pair[0] });
@@ -185,13 +213,22 @@ export class Room extends DurableObject {
       if (chars >= meta.totalChars && att.role !== meta.firstFinish) {
         if (!meta.firstFinish) {
           meta.firstFinish = att.role;
+          meta.settleAt = Date.now() + FINISH_WAIT_TTL;
           await this.ctx.storage.put("meta", meta);
-          await this.ctx.storage.setAlarm(Date.now() + FINISH_WAIT_TTL);
+          await this.scheduleAlarm(meta);
           this.broadcast({ t: "fin", role: att.role });
         } else {
           await this.settle(meta, meta.firstFinish, "finished");
         }
       }
+      return;
+    }
+
+    // 主動下車（回選單/取消）：立即判定，不吃斷線寬限
+    if (msg.t === "bye" && meta.state === "racing") {
+      const winner = meta.firstFinish || other(att.role);
+      await this.settle(meta, winner, att.role === meta.firstFinish ? "finished" : "forfeit");
+      this.sendTo(other(att.role), { t: "gone" });
       return;
     }
 
@@ -236,22 +273,24 @@ export class Room extends DurableObject {
     if (!att) return;
     const meta = await this.ctx.storage.get("meta");
     if (!meta) return;
+    meta.droppedAt ||= { host: 0, guest: 0 }; // 舊房相容
 
     if (meta.state === "racing") {
-      // 對戰中斷線：未完賽者離開 = 棄賽；已完賽者（等待中）離開 = 直接結算，勝負不變
-      const winner = meta.firstFinish || other(att.role);
-      const reason = att.role === meta.firstFinish ? "finished" : "forfeit";
-      await this.settle(meta, winner, reason);
-      this.sendTo(other(att.role), { t: "gone" }); // 離開者不會回來，再戰無望
+      // 對戰中斷線 ≠ 棄賽：部署切換或行動網路都會瞬斷，給寬限期，逾時才判定（見 alarm）
+      meta.droppedAt[att.role] = Date.now();
+      await this.ctx.storage.put("meta", meta);
+      await this.scheduleAlarm(meta);
+      this.sendTo(other(att.role), { t: "drop" });
     } else if (meta.state === "waiting") {
       if (att.role === "guest") {
-        meta.guestName = null;
+        meta.guestName = null; // key 仍有效，重連回來會再報到
         await this.ctx.storage.put("meta", meta);
         this.broadcast(this.roomMsg(meta));
       } else {
-        // 列車長離開 → 車次取消
-        this.broadcast({ t: "expired" });
-        await this.cleanup();
+        // 列車長瞬斷：先不取消車次，寬限逾時才取消（見 alarm）
+        meta.droppedAt.host = Date.now();
+        await this.ctx.storage.put("meta", meta);
+        await this.scheduleAlarm(meta);
       }
     } else if (meta.state === "done") {
       this.sendTo(other(att.role), { t: "gone" }); // 再戰無望，前端鎖住再戰鈕
@@ -260,10 +299,13 @@ export class Room extends DurableObject {
 
   webSocketError() { /* 錯誤後 runtime 會再觸發 webSocketClose，離場邏輯統一在那裡 */ }
 
-  /* 結算：勝負早在先衝線時就定了，這裡才廣播 end 讓雙方一起看結果 */
+  /* 結算：勝負早在先衝線時就定了，這裡才廣播 end 讓雙方一起看結果。
+     結果存進 meta：離線期間被結算的人重連時用 sync 補發 */
   async settle(meta, winner, reason) {
     meta.state = "done";
     meta.firstFinish = null;
+    meta.winner = winner;
+    meta.reason = reason;
     await this.ctx.storage.put("meta", meta);
     await this.ctx.storage.setAlarm(Date.now() + REMATCH_TTL);
     this.broadcast({ t: "end", winner, reason });
@@ -273,6 +315,10 @@ export class Room extends DurableObject {
     meta.state = "racing";
     meta.startAt = Date.now() + COUNTDOWN_MS;
     meta.firstFinish = null;
+    meta.settleAt = 0;
+    meta.raceEndAt = meta.startAt + RACE_TTL;
+    meta.droppedAt = { host: 0, guest: 0 };
+    meta.winner = meta.reason = null;
     meta.rematch = { host: false, guest: false };
     this.progress = { host: 0, guest: 0 };
     for (const ws of this.ctx.getWebSockets()) {
@@ -280,17 +326,70 @@ export class Room extends DurableObject {
       if (att) ws.serializeAttachment({ ...att, chars: 0 });
     }
     await this.ctx.storage.put("meta", meta);
-    await this.ctx.storage.setAlarm(meta.startAt + RACE_TTL);
+    await this.scheduleAlarm(meta);
     // 兩端用 (startAt - now) 對齊本地倒數，時鐘偏移互相抵銷
     this.broadcast({ t: "start", startAt: meta.startAt, now: Date.now() });
   }
 
+  /* alarm 只有一個槽：取「所有待決期限」的最早者（房間逾期、完賽等待、斷線寬限） */
+  async scheduleAlarm(meta) {
+    meta.droppedAt ||= { host: 0, guest: 0 };
+    let at;
+    if (meta.state === "waiting") {
+      at = meta.waitEndAt || meta.createdAt + WAIT_TTL;
+    } else {
+      at = meta.raceEndAt || meta.startAt + RACE_TTL;
+      if (meta.settleAt) at = Math.min(at, meta.settleAt);
+    }
+    for (const r of ["host", "guest"]) {
+      if (meta.droppedAt[r]) at = Math.min(at, meta.droppedAt[r] + RECONNECT_GRACE);
+    }
+    await this.ctx.storage.setAlarm(at);
+  }
+
   async alarm() {
-    // 先完賽者等待逾時：對手拖太久，直接結算（勝負不變）；其餘情況照舊過期清房
     const meta = await this.ctx.storage.get("meta");
-    if (meta && meta.state === "racing" && meta.firstFinish) {
-      await this.settle(meta, meta.firstFinish, "timeout");
+    if (!meta) { await this.cleanup(); return; }
+    const now = Date.now();
+    meta.droppedAt ||= { host: 0, guest: 0 };
+
+    if (meta.state === "racing") {
+      // 1) 斷線寬限逾時：沒回來的人出局
+      for (const r of ["host", "guest"]) {
+        if (meta.droppedAt[r] && now >= meta.droppedAt[r] + RECONNECT_GRACE && !this.ctx.getWebSockets(r).length) {
+          const o = other(r);
+          if (meta.droppedAt[o] && !this.ctx.getWebSockets(o).length) {
+            await this.cleanup(); // 兩邊都沒人：靜默清房
+            return;
+          }
+          await this.settle(meta, meta.firstFinish || o, r === meta.firstFinish ? "finished" : "forfeit");
+          this.sendTo(o, { t: "gone" });
+          return;
+        }
+      }
+      // 2) 先完賽者等待逾時：直接結算（勝負不變）
+      if (meta.settleAt && now >= meta.settleAt) {
+        await this.settle(meta, meta.firstFinish, "timeout");
+        return;
+      }
+      // 3) 單場時間上限
+      if (now >= (meta.raceEndAt || meta.startAt + RACE_TTL)) {
+        this.broadcast({ t: "expired" });
+        await this.cleanup();
+        return;
+      }
+      await this.scheduleAlarm(meta); // 提前醒來（例如已重連）：排下一個期限
       return;
+    }
+
+    if (meta.state === "waiting") {
+      // 列車長瞬斷的寬限逾時 or 房間逾期，才真的取消車次
+      const hostGone = meta.droppedAt.host &&
+        now >= meta.droppedAt.host + RECONNECT_GRACE && !this.ctx.getWebSockets("host").length;
+      if (!hostGone && now < (meta.waitEndAt || meta.createdAt + WAIT_TTL)) {
+        await this.scheduleAlarm(meta);
+        return;
+      }
     }
     this.broadcast({ t: "expired" });
     await this.cleanup();
