@@ -762,6 +762,13 @@ button:focus-visible, .line-card:focus-visible {
   25% { opacity: 1; transform: translate(-50%, -6px) scale(1.15); }
   100% { opacity: 0; transform: translate(-50%, -42px) scale(1); }
 }
+/* 中打選錯字：把送出的錯字紅字飄出，玩家才知道打到了什麼 */
+.combo-float.err {
+  color: var(--err);
+  font-style: normal;
+  font-size: 26px;
+  text-shadow: 0 0 14px #ff475f66;
+}
 
 .ime-warn, .pk-toast {
   position: fixed;
@@ -1080,16 +1087,28 @@ button:focus-visible, .line-card:focus-visible {
   width: 1px; height: 1px;
   border: none;
 }
-/* 中打模式：輸入框挪到打字面板上緣，IME 選字窗才會浮在視線附近而不是螢幕角落 */
+/* 中打模式：現形在打字面板內——組字、選字過程看得見，選字窗也會出現在視線附近 */
 #ghostInput.zh {
-  left: 50%; bottom: 150px;
-  transform: translateX(-50%);
-  width: 220px; height: 28px;
-  opacity: 0.01;
-  background: transparent;
-  color: transparent;
-  caret-color: transparent;
+  position: static;
+  display: block;
+  opacity: 1;
+  pointer-events: auto;
+  width: min(360px, 82%);
+  height: 46px;
+  margin: 12px auto 2px;
+  background: #0d1322d9;
+  border: 1px solid color-mix(in srgb, var(--line) 42%, #ffffff1f);
+  border-radius: 12px;
+  text-align: center;
+  font-family: inherit;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--ink);
+  caret-color: var(--line);
+  outline: none;
 }
+#ghostInput.zh:focus { box-shadow: 0 0 22px var(--glow-soft); border-color: var(--line); }
+#ghostInput.zh::placeholder { color: var(--ink-dim); font-size: 14px; font-weight: 600; }
 
 /* ─── Reduced motion ─────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>站名英打｜台北捷運 × 台灣鐵路</title>
+<title>鐵路打字｜台北捷運 × 台灣鐵路</title>
 <meta name="description" content="打站名英文拼音或中文站名，列車隨你的手速加速前進。收錄台北捷運六線與台鐵東西幹線，支援英打與中打（注音／拼音），可與 AI 對手對戰，或開車次邀請好友 PK。" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -19,7 +19,7 @@
       <div class="hero-mark" aria-hidden="true">
         <span class="mark-dot" style="--c:#0070BD"></span><span class="mark-dot" style="--c:#E3002C"></span><span class="mark-dot" style="--c:#008659"></span><span class="mark-dot" style="--c:#F8B61C"></span><span class="mark-dot" style="--c:#C48C31"></span><span class="mark-dot" style="--c:#FEDB00"></span>
       </div>
-      <h1>站名英打</h1>
+      <h1>鐵路打字</h1>
       <p class="tagline">打得越快，列車開得越快。</p>
       <p class="sub">TAIPEI METRO × TAIWAN RAILWAY</p>
     </header>
@@ -120,6 +120,8 @@
         <div class="next-label"><span id="nextPrefix">下一站</span> <b id="nextZh"></b><span class="next-en" id="nextEn"></span></div>
         <div class="word" id="word"></div>
         <div class="type-hint" id="typeHint">直接開始打字，空格可省略</div>
+        <!-- 英打：隱形收鍵盤；中打：現形讓組字選字看得見 -->
+        <input id="ghostInput" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="打字輸入" />
         <div class="fx-layer" id="fxLayer"></div>
       </div>
     </div>
@@ -162,7 +164,6 @@
   </div>
   <div class="pk-toast hidden" id="pkToast" role="status"></div>
 
-  <input id="ghostInput" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="打字輸入" />
 </div>
 <script src="data.js"></script>
 <script src="audio.js"></script>

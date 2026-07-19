@@ -1,4 +1,4 @@
-/* 站名英打 — 遊戲邏輯
+/* 鐵路打字 — 遊戲邏輯
    核心手法：視差圖層用 Web Animations API 無限循環位移，
    打字節奏換算成 playbackRate → 列車絲滑加減速（全程只動 transform/opacity）。
    電腦對戰：AI 對手以固定 KPM（含隨機起伏）推進，同場景賽跑。
@@ -401,9 +401,10 @@ function startGame(line, pkRace) {
 
   const zhMode = state.lang === "zh";
   els.word.classList.toggle("zh", zhMode);
-  els.ghost.classList.toggle("zh", zhMode); // 中打：輸入框移到打字面板附近，選字窗才不會出現在角落
+  els.ghost.classList.toggle("zh", zhMode); // 中打：輸入框現形在面板內，組字選字看得見
+  els.ghost.placeholder = zhMode ? "在這裡輸入站名" : "";
   els.typeHint.textContent = zhMode
-    ? "用中文輸入法輸入站名，選字後自動比對"
+    ? "用中文輸入法逐字或整串輸入・選錯的字會以紅字飄出"
     : "直接開始打字，空格可省略";
 
   const battle = state.mode === "battle";
@@ -839,6 +840,18 @@ function comboFloat(text) {
   els.fxLayer.appendChild(f);
 }
 
+/* 中打選錯字：把送出的錯字紅字飄出（例如目標「坪」卻送出「平」） */
+function wrongFloat(ch) {
+  if (reducedMotion) return;
+  const f = document.createElement("span");
+  f.className = "combo-float err";
+  f.textContent = ch;
+  f.style.left = "50%";
+  f.style.top = "34px";
+  f.addEventListener("animationend", () => f.remove());
+  els.fxLayer.appendChild(f);
+}
+
 /* ─── 打字處理 ──────────────────────────────────────── */
 let imeWarnTimer = 0;
 function showImeWarn(text) {
@@ -902,10 +915,22 @@ function handleChar(ch) {
   } else {
     state.errors += 1;
     state.combo = 0;
+    if (zh) wrongFloat(ch); // 玩家看不到 IME 送出的字，飄出來才知道錯在哪
     flashError();
     SFX.error();
   }
   updateStats();
+}
+
+/* 中打進字：IME 常一次送出整串；整詞重打時，已完成的前段不重複計誤 */
+function feedZh(text) {
+  if (!text || !state.playing || state.finished) return;
+  const done = targetWord().slice(0, state.pos);
+  if (state.pos > 0 && text.length > 1) {
+    if (done.startsWith(text)) return; // 只重打了已完成的部分：不計誤也不前進
+    if (text.startsWith(done)) text = text.slice(done.length);
+  }
+  [...text].forEach(handleChar);
 }
 
 function popStat(el) {
@@ -1518,7 +1543,9 @@ els.ghost.addEventListener("input", (e) => {
   }
   const data = e.data || els.ghost.value;
   els.ghost.value = "";
-  if (data) [...data].forEach(handleChar);
+  if (!data) return;
+  if (state.lang === "zh") feedZh(data);
+  else [...data].forEach(handleChar);
 });
 
 els.ghost.addEventListener("compositionstart", () => {
@@ -1532,13 +1559,14 @@ els.ghost.addEventListener("compositionend", (e) => {
   if (state.lang !== "zh") return;
   composeEndAt = performance.now();
   els.ghost.value = "";
-  if (e.data) [...e.data].forEach(handleChar);
+  feedZh(e.data || "");
 });
 
 document.addEventListener("keydown", (e) => {
   if (els.game.classList.contains("hidden")) return;
   if (!els.overlay.classList.contains("hidden")) return; // 結算畫面輸入暱稱時不搶焦點
   SFX.unlock(); // 瀏覽器需在使用者手勢後才允許發聲
+  if (e.isComposing || e.keyCode === 229) return; // IME 組字中：空白鍵選字等按鍵全交給輸入法
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === " ") e.preventDefault(); // 避免頁面捲動
   if (document.activeElement !== els.ghost) {
@@ -1549,7 +1577,10 @@ document.addEventListener("keydown", (e) => {
 
 document.addEventListener("click", () => {
   SFX.unlock();
-  if (!els.game.classList.contains("hidden") && state.playing) focusGhost();
+  // 已聚焦就不重聚焦：focusGhost 會清空輸入框，組字中誤點頁面不能把組字打斷
+  if (!els.game.classList.contains("hidden") && state.playing && document.activeElement !== els.ghost) {
+    focusGhost();
+  }
 });
 
 document.addEventListener("visibilitychange", () => {
