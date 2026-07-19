@@ -1490,11 +1490,13 @@ function tick(now) {
 
   // 地理路線圖：列車沿真實路徑滑動
   if (state.line) {
-    mapU += (playerUnits() - mapU) * 0.12;
-    if (state.mode === "battle") mapRivalU += (rivalUnits() - mapRivalU) * 0.12;
-    if (mapMode === "leaflet" && lRefs.train) {
-      // 鏡頭飛行中不動向量：飛行時中途 setLatLng 會投影到過渡座標系，線與列車看起來亂跑
-      if (performance.now() >= camBusyUntil) {
+    // 鏡頭飛行中連進度值一起凍結：飛行時投影在過渡狀態，中途重畫會亂跑；
+    // 凍住 mapU 讓藍線的成長動畫留到飛行結束後播，不會被鏡頭吃掉
+    const camBusy = mapMode === "leaflet" && performance.now() < camBusyUntil;
+    if (!camBusy) {
+      mapU += (playerUnits() - mapU) * 0.12;
+      if (state.mode === "battle") mapRivalU += (rivalUnits() - mapRivalU) * 0.12;
+      if (mapMode === "leaflet" && lRefs.train) {
         const p = latLngAt(mapU);
         lRefs.train.setLatLng(p);
         if (frame % 3 === 0) {
@@ -1503,9 +1505,9 @@ function tick(now) {
           lRefs.done.setLatLngs(done);
         }
         if (lRefs.rival) lRefs.rival.setLatLng(latLngAt(mapRivalU));
+      } else if (mapMode === "svg" && mapPts.length) {
+        positionMapMarkers();
       }
-    } else if (mapMode === "svg" && mapPts.length) {
-      positionMapMarkers();
     }
   }
 
