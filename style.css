@@ -1128,6 +1128,22 @@ button:focus-visible, .line-card:focus-visible {
   .gauge { width: 64px; }
   .gauge svg { width: 64px; }
   .gauge-num span { font-size: 13px; }
-  .spacer { min-height: 150px; }
   .result-grid { grid-template-columns: repeat(2, 1fr); gap: 14px; }
+
+  /* 手機重排：題目緊接地圖下方（鍵盤打開也看得到），風景退為純背景；
+     地圖彈性高度——鍵盤收起時自動放大，彈出時壓縮讓位給題目 */
+  #game { height: var(--vvh, 100dvh); min-height: var(--vvh, 100dvh); }
+  .spacer { display: none; }
+  .map-panel { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+  .map-view { flex: 1; min-height: 0; }
+  .map-view.leaflet-mode { height: auto; min-height: 120px; }
+  .bottom-ui { margin-top: 10px; }
+
+  /* 鍵盤打開（kb-open）：精簡非必要 UI，把空間留給地圖與題目 */
+  body.kb-open .hud-right,
+  body.kb-open .lead-chip,
+  body.kb-open .type-hint { display: none; }
+  body.kb-open #game { padding-top: 8px; }
+  body.kb-open .word { font-size: 24px; }
+  body.kb-open .word.zh { font-size: 26px; }
 }

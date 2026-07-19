@@ -1587,13 +1587,37 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-document.addEventListener("click", () => {
+document.addEventListener("click", (e) => {
   SFX.unlock();
+  if (els.game.classList.contains("hidden") || !state.playing) return;
   // 已聚焦就不重聚焦：focusGhost 會清空輸入框，組字中誤點頁面不能把組字打斷
-  if (!els.game.classList.contains("hidden") && state.playing && document.activeElement !== els.ghost) {
-    focusGhost();
-  }
+  if (document.activeElement === els.ghost) return;
+  // 觸控裝置：點打字面板才喚鍵盤；點地圖或場景不搶，玩家才能收起鍵盤看大地圖
+  if (matchMedia("(pointer: coarse)").matches && !els.typingPanel.contains(e.target)) return;
+  focusGhost();
 });
+
+/* 手機鍵盤佈局：--vvh 跟著可視高度走（iOS 鍵盤不改版面高度，得靠 visualViewport）；
+   kb-open 以輸入框焦點判定（跨平台最可靠），鍵盤打開時精簡 UI */
+if (window.visualViewport) {
+  let vvTimer;
+  const applyVV = () => {
+    document.documentElement.style.setProperty("--vvh", visualViewport.height + "px");
+    clearTimeout(vvTimer);
+    vvTimer = setTimeout(() => {
+      if (!els.game.classList.contains("hidden") && mapMode === "leaflet" && lMap) {
+        lMap.invalidateSize();
+        focusMapCam(false);
+      }
+    }, 200);
+  };
+  visualViewport.addEventListener("resize", applyVV);
+  applyVV();
+}
+if (matchMedia("(pointer: coarse)").matches) {
+  els.ghost.addEventListener("focus", () => document.body.classList.add("kb-open"));
+  els.ghost.addEventListener("blur", () => document.body.classList.remove("kb-open"));
+}
 
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
