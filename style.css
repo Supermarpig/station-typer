@@ -139,6 +139,15 @@ button:focus-visible, .line-card:focus-visible {
   box-shadow: 0 0 18px #ffffff2e;
 }
 
+/* 打字語言切換：比模式切換小一號 */
+.lang-toggle .mode-btn { font-size: 12px; padding: 6px 16px; }
+.lang-toggle .mode-btn small {
+  font-size: 10px;
+  font-weight: 600;
+  opacity: 0.65;
+  margin-left: 2px;
+}
+
 .rival-row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
 .rival-chip {
   display: flex; flex-direction: column; align-items: center; gap: 2px;
@@ -716,6 +725,7 @@ button:focus-visible, .line-card:focus-visible {
   animation: caretPulse 1.1s ease-in-out infinite;
 }
 .word .ch.sp { padding: 0 0.18em; }
+.word.zh { letter-spacing: 0.16em; font-size: clamp(24px, 5.2vw, 38px); }
 @keyframes caretPulse { 50% { border-color: transparent; } }
 
 .word.err-flash .ch.cur { color: var(--err); border-color: var(--err); }
@@ -1069,6 +1079,16 @@ button:focus-visible, .line-card:focus-visible {
   left: 0; bottom: 0;
   width: 1px; height: 1px;
   border: none;
+}
+/* 中打模式：輸入框挪到打字面板上緣，IME 選字窗才會浮在視線附近而不是螢幕角落 */
+#ghostInput.zh {
+  left: 50%; bottom: 150px;
+  transform: translateX(-50%);
+  width: 220px; height: 28px;
+  opacity: 0.01;
+  background: transparent;
+  color: transparent;
+  caret-color: transparent;
 }
 
 /* ─── Reduced motion ─────────────────────────────────── */

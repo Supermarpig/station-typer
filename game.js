@@ -23,7 +23,8 @@ const els = {
   word: $("word"), nextPrefix: $("nextPrefix"), nextZh: $("nextZh"), nextEn: $("nextEn"), fxLayer: $("fxLayer"),
   statKpm: $("statKpm"), statAcc: $("statAcc"), statCombo: $("statCombo"),
   kmh: $("kmh"), gaugeFill: $("gaugeFill"),
-  ghost: $("ghostInput"), imeWarn: $("imeWarn"), typingPanel: $("typingPanel"),
+  ghost: $("ghostInput"), imeWarn: $("imeWarn"), typingPanel: $("typingPanel"), typeHint: $("typeHint"),
+  langEn: $("langEn"), langZh: $("langZh"), footHint: $("footHint"),
   countdown: $("countdown"),
   backBtn: $("backBtn"), retryBtn: $("retryBtn"), pickBtn: $("pickBtn"),
   muteBtn: $("muteBtn"),
@@ -33,10 +34,11 @@ const els = {
 
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+/* kpm = 英打速度；zhKpm = 中打速度（中文選字慢，等級對應調降） */
 const RIVALS = [
-  { id: "local", name: "區間車", desc: "慢速巡航", kpm: 140, color: "#4aa3ff" },
-  { id: "tze", name: "自強號", desc: "穩定快攻", kpm: 300, color: "#ff9f43" },
-  { id: "taroko", name: "太魯閣號", desc: "極速狂飆", kpm: 460, color: "#ff475f" },
+  { id: "local", name: "區間車", desc: "慢速巡航", kpm: 140, zhKpm: 35, color: "#4aa3ff" },
+  { id: "tze", name: "自強號", desc: "穩定快攻", kpm: 300, zhKpm: 80, color: "#ff9f43" },
+  { id: "taroko", name: "太魯閣號", desc: "極速狂飆", kpm: 460, zhKpm: 140, color: "#ff475f" },
 ];
 
 const MAX_SPEED = 3;
@@ -183,6 +185,7 @@ els.train.innerHTML = trainSVG();
 const state = {
   line: null,
   mode: "solo",
+  lang: "en",      // en=英打（拼音逐鍵） zh=中打（IME 組字後逐字比對）
   pk: false,       // 好友對戰場（mode 仍為 battle，對手進度來自網路）
   rivalDef: RIVALS[1],
   idx: 0,          // 目前所在站
@@ -217,9 +220,39 @@ let lMap = null, lLayer = null;
 const lRefs = { done: null, dots: [], train: null, rival: null };
 
 /* ─── 路線選擇畫面 ──────────────────────────────────── */
-const pickerState = { mode: "solo", rivalId: "tze" };
+const LANG_KEY = "stationTyper.lang";
+const pickerState = {
+  mode: "solo",
+  rivalId: "tze",
+  lang: localStorage.getItem(LANG_KEY) === "zh" ? "zh" : "en", // en=英打 zh=中打
+};
 
-function bestKey(lineId) { return `stationTyper.best.${lineId}`; }
+/* 英打沿用舊 key（保留既有紀錄），中打另存 */
+function bestKey(lineId, lang) {
+  return `stationTyper.best.${lineId}` + (lang === "zh" ? ".zh" : "");
+}
+
+function applyLangUI() {
+  const zh = pickerState.lang === "zh";
+  els.langEn.classList.toggle("active", !zh);
+  els.langZh.classList.toggle("active", zh);
+  els.footHint.textContent = zh
+    ? "用中文輸入法輸入站名・注音、拼音都可以"
+    : "用鍵盤輸入站名英文拼音・請切換成英文輸入法";
+}
+
+function setLang(lang) {
+  if (pickerState.lang === lang) return;
+  pickerState.lang = lang;
+  localStorage.setItem(LANG_KEY, lang);
+  applyLangUI();
+  renderRivals();   // 對手 KPM 依語言不同
+  renderPicker();   // 最佳成績分語言
+  loadHomeBoard();  // 排行榜分語言
+}
+
+els.langEn.addEventListener("click", () => setLang("en"));
+els.langZh.addEventListener("click", () => setLang("zh"));
 
 function renderPickerBg() {
   const copies = Math.ceil(innerWidth / STRIP_W) + 1;
@@ -233,7 +266,7 @@ function renderRivals() {
     chip.type = "button";
     chip.className = "rival-chip" + (r.id === pickerState.rivalId ? " active" : "");
     chip.style.setProperty("--rc", r.color);
-    chip.innerHTML = `${r.name}<small>${r.desc}・${r.kpm} KPM</small>`;
+    chip.innerHTML = `${r.name}<small>${r.desc}・${pickerState.lang === "zh" ? r.zhKpm : r.kpm} KPM</small>`;
     chip.addEventListener("click", () => {
       pickerState.rivalId = r.id;
       renderRivals();
@@ -263,7 +296,7 @@ function renderPicker() {
   LINES.forEach((line) => {
     const first = line.stations[0].zh;
     const last = line.stations[line.stations.length - 1].zh;
-    const best = JSON.parse(localStorage.getItem(bestKey(line.id)) || "null");
+    const best = JSON.parse(localStorage.getItem(bestKey(line.id, pickerState.lang)) || "null");
     const card = document.createElement("button");
     card.className = "line-card";
     card.type = "button";
@@ -307,7 +340,7 @@ function initHomeBoard() {
 async function loadHomeBoard() {
   els.hbList.innerHTML = `<div class="board-hint">載入中…</div>`;
   try {
-    const rows = await fetch(`/api/scores?line=${encodeURIComponent(hbState.line)}`).then((r) => r.json());
+    const rows = await fetch(`/api/scores?line=${encodeURIComponent(hbState.line)}&lang=${pickerState.lang}`).then((r) => r.json());
     if (!Array.isArray(rows) || !rows.length) {
       els.hbList.innerHTML = `<div class="board-hint">這條線還沒有紀錄，搶頭香！</div>`;
       return;
@@ -328,6 +361,7 @@ function startGame(line, pkRace) {
   state.line = line;
   state.pk = !!pkRace; // 好友對戰：呈現層沿用 battle，對手進度來自網路
   state.mode = state.pk ? "battle" : pickerState.mode;
+  state.lang = state.pk ? pk.lang : pickerState.lang; // 好友對戰跟隨車次設定
   state.rivalDef = state.pk
     ? { id: "pk", name: pk.oppName || "對手", kpm: 0, color: "#ff475f" }
     : RIVALS.find((r) => r.id === pickerState.rivalId) || RIVALS[1];
@@ -348,7 +382,7 @@ function startGame(line, pkRace) {
   rivalX = 0;
 
   // 累計字元數（用於賽況換算）— 起點站也要打（發車確認），所以包含全部站名
-  const words = line.stations.map((s) => s.typing);
+  const words = line.stations.map(stationWord);
   state.cum = [0];
   words.forEach((w, i) => state.cum.push(state.cum[i] + w.length));
   state.totalChars = state.cum[state.cum.length - 1];
@@ -363,7 +397,14 @@ function startGame(line, pkRace) {
   els.lineChip.innerHTML = `
     <span class="roundel ${line.operator === "tra" ? "tra" : ""}"
           style="--lc:${line.color};--lc-ink:${line.darkText ? "#20242c" : "#fff"}">${line.badge}</span>
-    <span>${line.zh}</span>`;
+    <span>${line.zh}${state.lang === "zh" ? "・中打" : ""}</span>`;
+
+  const zhMode = state.lang === "zh";
+  els.word.classList.toggle("zh", zhMode);
+  els.ghost.classList.toggle("zh", zhMode); // 中打：輸入框移到打字面板附近，選字窗才不會出現在角落
+  els.typeHint.textContent = zhMode
+    ? "用中文輸入法輸入站名，選字後自動比對"
+    : "直接開始打字，空格可省略";
 
   const battle = state.mode === "battle";
   els.rivalTrain.classList.toggle("hidden", !battle);
@@ -431,7 +472,9 @@ function runCountdown() {
 function station(i) { return state.line.stations[i]; }
 function atStation() { return Math.min(Math.max(state.idx - 1, 0), state.line.stations.length - 1); }
 function targetStation() { return station(Math.min(state.idx, state.line.stations.length - 1)); }
-function targetWord() { return targetStation().typing; }
+function stationWord(s) { return state.lang === "zh" ? s.zhTyping : s.typing; }
+function targetWord() { return stationWord(targetStation()); }
+function rivalKpmVal() { return state.lang === "zh" ? state.rivalDef.zhKpm : state.rivalDef.kpm; }
 function playerChars() { return state.cum[state.idx] + state.pos; }
 
 /* ─── 地理路線圖（真實經緯度）──────────────────────── */
@@ -797,10 +840,32 @@ function comboFloat(text) {
 }
 
 /* ─── 打字處理 ──────────────────────────────────────── */
+let imeWarnTimer = 0;
+function showImeWarn(text) {
+  els.imeWarn.textContent = text;
+  els.imeWarn.classList.remove("hidden");
+  clearTimeout(imeWarnTimer);
+  imeWarnTimer = setTimeout(() => els.imeWarn.classList.add("hidden"), 2200);
+}
+
+let zhHintAt = 0;
+function zhImeHint() {
+  if (performance.now() - zhHintAt < 3000) return;
+  zhHintAt = performance.now();
+  showImeWarn("中打模式 — 請切換成中文輸入法");
+}
+
 function handleChar(ch) {
   if (!state.playing || state.finished || ch.length !== 1) return;
-  ch = ch.toLowerCase();
-  if (!/[a-z0-9 ]/.test(ch)) return;
+  const zh = state.lang === "zh";
+  if (zh) {
+    if (/\s/.test(ch)) return;
+    if (/[０-９]/.test(ch)) ch = String.fromCharCode(ch.charCodeAt(0) - 0xfee0); // 全形數字→半形（台北101）
+    if (/[a-z]/i.test(ch)) { zhImeHint(); return; } // 字母出現 = 沒開中文輸入法：提示但不計誤擊
+  } else {
+    ch = ch.toLowerCase();
+    if (!/[a-z0-9 ]/.test(ch)) return;
+  }
 
   if (!state.startTime) state.startTime = performance.now();
   const w = targetWord();
@@ -810,7 +875,7 @@ function handleChar(ch) {
   if (ch === expected) {
     state.pos += 1;
     ok = true;
-  } else if (expected === " " && ch === w[state.pos + 1]) {
+  } else if (!zh && expected === " " && ch === w[state.pos + 1]) {
     state.pos += 2; // 漏打空格但字母正確 → 寬容處理
     ok = true;
   }
@@ -885,16 +950,16 @@ function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-async function loadBoard(lineId) {
+async function loadBoard(lineId, lang) {
   els.board.innerHTML = `<div class="board-hint">排行榜載入中…</div>`;
   try {
-    const rows = await fetch(`/api/scores?line=${encodeURIComponent(lineId)}`).then((r) => r.json());
+    const rows = await fetch(`/api/scores?line=${encodeURIComponent(lineId)}&lang=${lang}`).then((r) => r.json());
     if (!Array.isArray(rows) || !rows.length) {
       els.board.innerHTML = `<div class="board-hint">這條線還沒有紀錄，搶頭香！</div>`;
       return;
     }
     els.board.innerHTML =
-      `<div class="board-title">路線排行榜 TOP ${rows.length}</div>` +
+      `<div class="board-title">路線排行榜 TOP ${rows.length}・${lang === "zh" ? "中打" : "英打"}</div>` +
       rows.map((r, i) =>
         `<div class="board-row${i === 0 ? " top1" : ""}">
           <b>${i + 1}</b><span class="b-name">${esc(r.name)}</span>
@@ -922,7 +987,7 @@ async function uploadScore() {
     const data = await res.json();
     if (!res.ok || !data.ok) throw new Error(data.error || "upload failed");
     els.uploadBtn.textContent = `已上傳 ✓ 第 ${data.rank} 名`;
-    loadBoard(lastRun.lineId);
+    loadBoard(lastRun.lineId, lastRun.lang);
   } catch {
     els.uploadBtn.disabled = false;
     els.uploadBtn.textContent = "失敗，再試一次";
@@ -938,7 +1003,7 @@ const PK_SEND_MS = 150;         // 進度回報節流間隔
 
 const pk = {
   ws: null, role: null, code: null, hostKey: null,
-  line: null, myName: "", oppName: "",
+  line: null, lang: "en", myName: "", oppName: "",
   state: "idle",      // idle | waiting | racing | done
   oppChars: 0,        // 對手最後回報的累計字元數
   playAt: 0,          // 本地時鐘的起跑時刻（由伺服器 startAt 校正時差而來）
@@ -964,17 +1029,18 @@ function setLineTheme(line) {
   document.documentElement.style.setProperty("--line-ink", line.darkText ? "#20242c" : "#ffffff");
 }
 
-/* 列車長：點路線卡 → 開新車次 */
+/* 列車長：點路線卡 → 開新車次（打字語言跟隨選單設定，全車一致） */
 async function pkCreate(line) {
   const name = cleanNick(els.pkNick.value);
   if (!name) { els.pkNick.focus(); return; }
   localStorage.setItem(NICK_KEY, name);
-  const totalChars = line.stations.reduce((n, s) => n + s.typing.length, 0);
+  const lang = pickerState.lang;
+  const totalChars = line.stations.reduce((n, s) => n + (lang === "zh" ? s.zhTyping : s.typing).length, 0);
   try {
     const res = await fetch("/api/room", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ lineId: line.id, name, totalChars }),
+      body: JSON.stringify({ lineId: line.id, name, totalChars, lang }),
     });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error);
@@ -983,6 +1049,7 @@ async function pkCreate(line) {
     pk.hostKey = data.hostKey;
     pk.myName = name;
     pk.line = line;
+    pk.lang = lang;
     setLineTheme(line);
     pkConnect();
   } catch {
@@ -1019,15 +1086,16 @@ function lineRoundel(line) {
 function renderPkJoin(code, info, line) {
   setLineTheme(line);
   const nick = localStorage.getItem(NICK_KEY) || "";
+  const zh = info.lang === "zh"; // 打字語言由列車長開車次時決定
   els.pkCard.innerHTML = `
     <p class="result-eyebrow">乘車邀請 INVITE</p>
     <div class="train-no"><small>車次 TRAIN</small>${code}</div>
-    <div class="card-lineinfo">${lineRoundel(line)}<span>${line.zh}・${line.stations.length} 站</span></div>
-    <p class="pk-invite-line"><b>${esc(info.hostName)}</b> 邀請你來一場站名英打對決</p>
+    <div class="card-lineinfo">${lineRoundel(line)}<span>${line.zh}・${line.stations.length} 站・${zh ? "中打" : "英打"}</span></div>
+    <p class="pk-invite-line"><b>${esc(info.hostName)}</b> 邀請你來一場站名${zh ? "中打" : "英打"}對決</p>
     <input class="ti wide" id="pkJoinNick" type="text" maxlength="12" placeholder="輸入暱稱"
            autocomplete="off" value="${esc(nick)}" />
     <button class="primary-btn" id="pkJoinGo" type="button">上車</button>
-    <p class="card-foot">需要英文鍵盤・約 3–5 分鐘一局</p>`;
+    <p class="card-foot">${zh ? "需要中文輸入法" : "需要英文鍵盤"}・約 3–5 分鐘一局</p>`;
   const board = () => {
     const nickV = cleanNick($("pkJoinNick").value);
     if (!nickV) { $("pkJoinNick").focus(); return; }
@@ -1037,6 +1105,7 @@ function renderPkJoin(code, info, line) {
     pk.hostKey = null;
     pk.myName = nickV;
     pk.line = line;
+    pk.lang = zh ? "zh" : "en";
     pkConnect();
   };
   $("pkJoinGo").addEventListener("click", board);
@@ -1146,7 +1215,7 @@ function renderPkRoom(msg) {
   els.pkCard.innerHTML = `
     <p class="result-eyebrow">月台 PLATFORM</p>
     <div class="train-no"><small>車次 TRAIN</small>${pk.code}</div>
-    <div class="card-lineinfo">${lineRoundel(line)}<span>${line.zh}・${first} ⇄ ${last}・${line.stations.length} 站</span></div>
+    <div class="card-lineinfo">${lineRoundel(line)}<span>${line.zh}・${first} ⇄ ${last}・${line.stations.length} 站・${pk.lang === "zh" ? "中打" : "英打"}</span></div>
     <div class="platform">
       <div class="track">
         <span class="train-chip"></span>
@@ -1279,6 +1348,7 @@ function finish(playerWon) {
   lastRun = {
     lineId: state.line.id,
     mode: state.mode,
+    lang: state.lang,
     correct: state.correct,
     errors: state.errors,
     maxCombo: state.maxCombo,
@@ -1290,7 +1360,7 @@ function finish(playerWon) {
   els.uploadBtn.disabled = false;
   els.uploadBtn.textContent = "上傳成績";
   els.nickInput.value = localStorage.getItem(NICK_KEY) || "";
-  loadBoard(state.line.id);
+  loadBoard(state.line.id, state.lang);
 
   if (state.mode === "battle") playerWon ? SFX.win() : SFX.lose();
   else SFX.terminal();
@@ -1302,7 +1372,7 @@ function finish(playerWon) {
     $("resultEyebrow").textContent = "對戰結果 RESULT";
     h2.textContent = playerWon ? "勝利！" : "敗北⋯";
     h2.classList.toggle("lose", !playerWon);
-    const kpmTag = state.pk ? "" : `（${state.rivalDef.kpm} KPM）`; // 真人對手不標 KPM
+    const kpmTag = state.pk ? "" : `（${rivalKpmVal()} KPM）`; // 真人對手不標 KPM
     $("resultLine").textContent = playerWon
       ? `你在${state.line.zh}甩開了 ${state.rivalDef.name}${kpmTag}`
       : `被 ${state.rivalDef.name} 搶先抵達${station(state.line.stations.length - 1).zh}`;
@@ -1323,9 +1393,9 @@ function finish(playerWon) {
 
   let isBest = false;
   if (state.mode === "solo") {
-    const prevBest = JSON.parse(localStorage.getItem(bestKey(state.line.id)) || "null");
+    const prevBest = JSON.parse(localStorage.getItem(bestKey(state.line.id, state.lang)) || "null");
     isBest = !prevBest || score > prevBest.score;
-    if (isBest) localStorage.setItem(bestKey(state.line.id), JSON.stringify({ score, kpm, acc }));
+    if (isBest) localStorage.setItem(bestKey(state.line.id, state.lang), JSON.stringify({ score, kpm, acc }));
   }
   $("rBest").classList.toggle("hidden", !isBest);
 
@@ -1349,7 +1419,8 @@ function tick(now) {
   if (state.playing || state.finished) {
     state.keyTimes = state.keyTimes.filter((t) => now - t < 2000);
     const cps = state.keyTimes.length / 2;
-    const target = state.playing && state.startTime ? 0.18 + Math.min(cps / 6, 1) * (MAX_SPEED - 0.2) : 0;
+    const fullCps = state.lang === "zh" ? 2.2 : 6; // 滿速門檻：中文選字節奏比英打慢
+    const target = state.playing && state.startTime ? 0.18 + Math.min(cps / fullCps, 1) * (MAX_SPEED - 0.2) : 0;
     speed += (target - speed) * 0.06;
   } else {
     speed += (0 - speed) * 0.05;
@@ -1364,7 +1435,7 @@ function tick(now) {
       state.rival.chars += (pk.oppChars - state.rival.chars) * Math.min(1, dt / 160);
     } else {
       const jitter = 0.82 + 0.36 * (0.5 + 0.5 * Math.sin(now / 2300 + 1.3));
-      state.rival.chars += (state.rivalDef.kpm / 60) * (dt / 1000) * jitter;
+      state.rival.chars += (rivalKpmVal() / 60) * (dt / 1000) * jitter;
     }
     while (state.rival.idx < state.cum.length - 1 && state.rival.chars >= state.cum[state.rival.idx + 1]) {
       state.rival.idx += 1;
@@ -1435,20 +1506,33 @@ function focusGhost() {
   els.ghost.focus({ preventScroll: true });
 }
 
+let composeEndAt = 0;
+
 els.ghost.addEventListener("input", (e) => {
   if (e.isComposing) return;
+  // 中打：選字結果已在 compositionend 處理；有些瀏覽器（Firefox）事件順序相反，
+  // compositionend 後緊接的 input 帶同一段字串，不能重複計
+  if (state.lang === "zh" && performance.now() - composeEndAt < 80) {
+    els.ghost.value = "";
+    return;
+  }
   const data = e.data || els.ghost.value;
   els.ghost.value = "";
   if (data) [...data].forEach(handleChar);
 });
 
 els.ghost.addEventListener("compositionstart", () => {
-  els.imeWarn.classList.remove("hidden");
+  if (state.lang === "zh") return; // 中打模式：IME 組字是正常流程
+  showImeWarn("偵測到中文輸入法 — 請切換成英數模式");
   els.ghost.blur();
-  setTimeout(() => {
-    els.imeWarn.classList.add("hidden");
-    focusGhost();
-  }, 2200);
+  setTimeout(focusGhost, 2200);
+});
+
+els.ghost.addEventListener("compositionend", (e) => {
+  if (state.lang !== "zh") return;
+  composeEndAt = performance.now();
+  els.ghost.value = "";
+  if (e.data) [...e.data].forEach(handleChar);
 });
 
 document.addEventListener("keydown", (e) => {
@@ -1532,6 +1616,7 @@ function pkGoByCode() {
 els.pkCodeGo.addEventListener("click", pkGoByCode);
 els.pkCodeInput.addEventListener("keydown", (e) => { if (e.key === "Enter") pkGoByCode(); });
 
+applyLangUI(); // 語言偏好記在 localStorage，先套用再渲染
 renderPicker();
 renderRivals();
 renderPickerBg();

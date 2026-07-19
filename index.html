@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>站名英打｜台北捷運 × 台灣鐵路</title>
-<meta name="description" content="打站名英文拼音，列車隨你的手速加速前進。收錄台北捷運六線與台鐵東西幹線，可與 AI 對手對戰，或開車次邀請好友 PK。" />
+<meta name="description" content="打站名英文拼音或中文站名，列車隨你的手速加速前進。收錄台北捷運六線與台鐵東西幹線，支援英打與中打（注音／拼音），可與 AI 對手對戰，或開車次邀請好友 PK。" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <link rel="stylesheet" href="style.css" />
@@ -30,6 +30,10 @@
         <button class="mode-btn" id="modeBattle" type="button">電腦對戰</button>
         <button class="mode-btn" id="modePk" type="button">好友對戰</button>
       </div>
+      <div class="mode-toggle lang-toggle" role="tablist" aria-label="打字語言">
+        <button class="mode-btn active" id="langEn" type="button">英打 <small>ABC</small></button>
+        <button class="mode-btn" id="langZh" type="button">中打 <small>注音</small></button>
+      </div>
       <div class="rival-row hidden" id="rivalRow"></div>
       <div class="pk-setup hidden" id="pkSetup">
         <input class="ti" id="pkNick" type="text" maxlength="12" placeholder="輸入暱稱" autocomplete="off" />
@@ -51,7 +55,7 @@
       <div class="hb-list" id="hbList"></div>
     </section>
 
-    <p class="foot-hint">用鍵盤輸入站名英文拼音・請切換成英文輸入法</p>
+    <p class="foot-hint" id="footHint">用鍵盤輸入站名英文拼音・請切換成英文輸入法</p>
     <a class="site-link" href="https://www.bloodtw.com/?utm_source=station-typer&utm_medium=referral&utm_content=picker" target="_blank" rel="noopener">🩸 捐血資訊查詢 bloodtw.com</a>
   </section>
 

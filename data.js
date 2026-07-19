@@ -1,6 +1,7 @@
 // 站名資料 — 台北捷運 × 台灣鐵路
 // pos: [緯度, 經度]（近似值，用於地理路線圖）
 // typing 欄位由英文站名自動轉換（小寫、去標點、/ 與 - 轉空格）
+// zhTyping 欄位為中打目標：中文站名去掉「/」（廣慈/奉天宮 → 廣慈奉天宮）
 
 const LINES = [
   {
@@ -279,5 +280,6 @@ function toTyping(en) {
 LINES.forEach((line) => {
   line.stations.forEach((s) => {
     s.typing = toTyping(s.en);
+    s.zhTyping = s.zh.replace(/\//g, "");
   });
 });

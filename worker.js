@@ -53,6 +53,7 @@ async function createRoom(req, env) {
   const name = cleanName(b.name);
   if (!name) return json({ error: "bad name" }, 400);
   if (!LINE_IDS.has(b.lineId)) return json({ error: "bad line" }, 400);
+  const lang = b.lang === "zh" ? "zh" : "en"; // 打字語言由列車長決定，全車一致
   const totalChars = b.totalChars | 0; // 由靜態站名資料算出，雙端一致；僅作合理性界定
   if (totalChars < 20 || totalChars > 3000) return json({ error: "bad stats" }, 400);
 
@@ -60,7 +61,7 @@ async function createRoom(req, env) {
   for (let i = 0; i < 8; i++) {
     const code = String(1000 + Math.floor(Math.random() * 9000));
     const stub = env.ROOM.getByName(`room:${code}`);
-    const ok = await stub.create({ code, lineId: b.lineId, totalChars, hostName: name, hostKey });
+    const ok = await stub.create({ code, lineId: b.lineId, lang, totalChars, hostName: name, hostKey });
     if (ok) return json({ ok: true, code, hostKey });
   }
   return json({ error: "busy" }, 503); // 連撞 8 次車次號：活躍房間已近上限
@@ -108,6 +109,7 @@ export class Room extends DurableObject {
     return {
       code: meta.code,
       lineId: meta.lineId,
+      lang: meta.lang || "en",
       hostName: meta.hostName,
       state: meta.state,
       full: this.ctx.getWebSockets("guest").length > 0,
@@ -288,9 +290,10 @@ export class Room extends DurableObject {
 async function getScores(url, env) {
   const line = url.searchParams.get("line");
   if (!LINE_IDS.has(line)) return json({ error: "bad line" }, 400);
+  const lang = url.searchParams.get("lang") === "zh" ? "zh" : "en";
   const { results } = await env.DB.prepare(
-    "SELECT name, score, kpm, acc, mode FROM scores WHERE line_id = ?1 ORDER BY score DESC, id ASC LIMIT ?2"
-  ).bind(line, TOP_N).all();
+    "SELECT name, score, kpm, acc, mode FROM scores WHERE line_id = ?1 AND lang = ?2 ORDER BY score DESC, id ASC LIMIT ?3"
+  ).bind(line, lang, TOP_N).all();
   return json(results);
 }
 
@@ -301,6 +304,7 @@ async function postScore(req, env) {
   const name = cleanName(b.name);
   const correct = b.correct | 0, errors = b.errors | 0;
   const maxCombo = b.maxCombo | 0, timeMs = b.timeMs | 0;
+  const lang = b.lang === "zh" ? "zh" : "en"; // en=英打 zh=中打，排行榜分開計
 
   if (!name) return json({ error: "bad name" }, 400);
   if (!LINE_IDS.has(b.lineId)) return json({ error: "bad line" }, 400);
@@ -311,7 +315,7 @@ async function postScore(req, env) {
 
   const mins = timeMs / 60000;
   const kpm = Math.round(correct / mins);
-  if (kpm > 1400) return json({ error: "bad stats" }, 400); // 超出人類極限
+  if (kpm > (lang === "zh" ? 400 : 1400)) return json({ error: "bad stats" }, 400); // 超出人類極限
 
   const acc = Math.round((correct / (correct + errors)) * 100);
   const score = Math.max(0, correct * 10 + maxCombo * 5 - errors * 3); // 與遊戲端同一公式
@@ -323,12 +327,12 @@ async function postScore(req, env) {
   if (recent.n >= RATE_LIMIT) return json({ error: "too many uploads" }, 429);
 
   await env.DB.prepare(
-    "INSERT INTO scores (name, line_id, mode, score, kpm, acc, max_combo, time_ms, ip) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)"
-  ).bind(name, b.lineId, b.mode, score, kpm, acc, maxCombo, timeMs, ip).run();
+    "INSERT INTO scores (name, line_id, mode, lang, score, kpm, acc, max_combo, time_ms, ip) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)"
+  ).bind(name, b.lineId, b.mode, lang, score, kpm, acc, maxCombo, timeMs, ip).run();
 
   const above = await env.DB.prepare(
-    "SELECT COUNT(*) AS n FROM scores WHERE line_id = ?1 AND score > ?2"
-  ).bind(b.lineId, score).first();
+    "SELECT COUNT(*) AS n FROM scores WHERE line_id = ?1 AND lang = ?2 AND score > ?3"
+  ).bind(b.lineId, lang, score).first();
 
   return json({ ok: true, score, rank: above.n + 1 });
 }
